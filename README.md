@@ -10,6 +10,23 @@ This project simulates Rayleigh-Bénard convection using a numerical approach. T
 - **Data Storage**: Saves simulation data in HDF5 format for further analysis.
 - **Visualization**: Generates PNG images of the temperature field at each simulation step, stored in the `rb_data_numerical` directory.
 
+## Initial and Boundary Conditions
+
+- **Initial Conditions**: 
+  - The temperature field is initialized with a linear gradient from 1.0 at the bottom wall to 0.0 at the top wall, with a small random perturbation added.
+  - The velocity fields (u and v) are initialized to zero.
+
+- **Boundary Conditions**:
+  - Temperature: Fixed at 1.0 on the bottom wall and 0.0 on the top wall.
+  - Velocity: Periodic boundary conditions are applied on the left and right sides.
+
+## Simulation Steps
+
+1. **Pressure Poisson Equation**: Solved using the Fast Fourier Transform (FFT) to update the pressure field.
+2. **Velocity Update**: The velocity fields (u and v) are updated using the Adams-Bashforth time integration scheme.
+3. **Temperature Update**: The temperature field is updated using the same Adams-Bashforth scheme, considering diffusion and advection terms.
+4. **Boundary Conditions Enforcement**: The temperature and velocity fields are adjusted to maintain the specified boundary conditions.
+
 ## Usage
 
 To run the simulation and generate data:
