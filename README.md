@@ -27,6 +27,13 @@ This project simulates Rayleigh-Bénard convection using a numerical approach. T
 3. **Temperature Update**: The temperature field is updated using the same Adams-Bashforth scheme, considering diffusion and advection terms.
 4. **Boundary Conditions Enforcement**: The temperature and velocity fields are adjusted to maintain the specified boundary conditions.
 
+## Simulation Parameters
+
+- **Grid and Domain**: The simulation uses a grid of `768 x 256` with a domain size of `Lx = 3.0` and `Ly = 1.0`.
+- **Time Step and Duration**: The time step is `dt = 5e-4`, and the simulation runs up to a final time of `tf = 60`.
+- **Prandtl and Rayleigh Numbers**: The Prandtl number is fixed at `Pr = 0.7`, and simulations are conducted for Rayleigh numbers `Ra = 1e5`, `1e6`, and `1e7`.
+- **Data Collection**: Data is collected for `t ∈ [25, 45]` with time increments `delta_t = 0.1` for `Ra = 1e5` and `delta_t = 0.05` for `Ra = 1e6` and `1e7`.
+
 ## Usage
 
 To run the simulation and generate data:
