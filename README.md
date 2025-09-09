@@ -6,16 +6,16 @@
 
 A comprehensive implementation of **CDAnet** (Continuous Data Assimilation Network), a physics-informed deep neural network for high-resolution reconstruction of Rayleigh-Bénard convection from sparse observations.
 
-## 🚀 Features
+## Features
 
-- **🧠 CDAnet Architecture**: Complete implementation with 3D U-Net + Physics-Informed MLP
-- **⚡ High-Resolution Reconstruction**: Downscale from low-resolution observations to high-resolution fields
-- **🔬 Physics Integration**: PDE residuals as soft constraints in loss function
-- **📊 Comprehensive Evaluation**: RRMSE metrics, temporal evolution analysis, and generalization testing
-- **⚙️ Production Ready**: Modular codebase with configuration management and experiment tracking
-- **📈 Monitoring**: TensorBoard/WandB integration with detailed logging
+- **CDAnet Architecture**: Complete implementation with 3D U-Net + Physics-Informed MLP
+- **High-Resolution Reconstruction**: Downscale from low-resolution observations to high-resolution fields
+- **Physics Integration**: PDE residuals as soft constraints in loss function
+- **Comprehensive Evaluation**: RRMSE metrics, temporal evolution analysis, and generalization testing
+- **Production Ready**: Modular codebase with configuration management and experiment tracking
+- **Monitoring**: TensorBoard/WandB integration with detailed logging
 
-## 🏗️ Architecture
+## Architecture
 
 CDAnet combines two key components:
 
@@ -36,7 +36,7 @@ Low-res clip [B, 4, T, H, W] → 3D U-Net → Features [B, C, T, H, W]
 Coordinates [B, N, 3] + Features → MLP → High-res fields [B, N, 4]
 ```
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 CDAsmoother/
@@ -74,7 +74,7 @@ CDAsmoother/
 └── README.md                        # This file
 ```
 
-## 📦 Installation
+## Installation
 
 ### Prerequisites
 - Python 3.8+
@@ -101,7 +101,7 @@ conda activate cdasmoother
 - **Logging**: TensorBoard, Weights & Biases (optional)
 - **Data**: scikit-learn, pandas
 
-## 🚀 Quick Start
+## Quick Start
 
 ### 1. Generate Training Data
 ```bash
@@ -191,7 +191,7 @@ Then run:
 python train_cdanet.py --config config.yaml
 ```
 
-## 📊 Results & Performance
+## Results & Performance
 
 ### Expected Performance (from paper)
 | Ra Number | Downsampling (γ_s, γ_t) | RRMSE (avg) |
