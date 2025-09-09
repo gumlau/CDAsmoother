@@ -207,7 +207,7 @@ python train_cdanet.py --config config.yaml
 - **Temporal Consistency**: Maintains physical evolution over time
 - **Generalization**: Transfers across different Rayleigh numbers
 
-## 🧪 Advanced Usage
+## Advanced Usage
 
 ### Custom Training Loop
 ```python
@@ -232,26 +232,8 @@ trainer = CDAnetTrainer(config, model, data_module, logger)
 trainer.train()
 ```
 
-### Custom Evaluation
-```python
-from cdanet.evaluation import CDAnetEvaluator
 
-evaluator = CDAnetEvaluator(model, data_module, config.evaluation)
-
-# Evaluate on test set
-metrics = evaluator.evaluate_on_dataset(Ra=1e5, split='test')
-
-# Test generalization
-gen_results = evaluator.evaluate_generalization(
-    train_Ra=1e5, 
-    test_Ra_list=[7e5, 8e5, 9e5]
-)
-
-# Create comprehensive report
-evaluator.create_evaluation_report('./eval_results')
-```
-
-## 🔬 Physics Implementation
+## Physics Implementation
 
 ### Governing Equations
 The network enforces Rayleigh-Bénard convection equations as soft constraints:
@@ -267,79 +249,15 @@ L_total = ||y_pred - y_true||₁ + λ × ||PDE_residual||₁
 
 Where PDE residual includes all governing equations computed via automatic differentiation.
 
-## 🛠️ Development
 
-### Running Tests
-```bash
-pytest tests/ -v
-```
 
-### Code Formatting
-```bash
-black cdanet/
-flake8 cdanet/
-```
+## Citation
 
-### Contributing
-1. Fork the repository
-2. Create a feature branch
-3. Make changes with tests
-4. Submit a pull request
 
-## 📖 Citation
-
-If you use this code in your research, please cite:
-
-```bibtex
-@article{cdanet2022,
-  title={Physics-informed neural networks for continuous data assimilation},
-  journal={Journal of Advances in Modeling Earth Systems},
-  year={2022}
-}
-```
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-1. **CUDA Out of Memory**
-   ```bash
-   # Reduce batch size or feature channels
-   python train_cdanet.py --batch_size 16 --feature_channels 128
-   ```
-
-2. **Poor Convergence**
-   ```bash
-   # Adjust PDE loss weight
-   python train_cdanet.py --lambda_pde 0.1
-   ```
-
-3. **Data Loading Errors**
-   - Ensure HDF5 files are properly formatted
-   - Check data directory permissions
-
-### Performance Tips
-- Use mixed precision training (enabled by default)
-- Increase `num_workers` for faster data loading
-- Monitor PDE loss weight λ - crucial for performance
-- Use appropriate spatial/temporal downsampling ratios
-
-## 📄 License
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🙏 Acknowledgments
-
-- Original CDAnet paper authors for the theoretical foundation
-- PyTorch team for the deep learning framework
-- Scientific computing community for numerical methods
-
-## 📞 Support
-
-- **Issues**: [GitHub Issues](https://github.com/yourusername/CDAsmoother/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yourusername/CDAsmoother/discussions)
-- **Email**: your.email@domain.com
-
----
+## Acknowledgments
 
 **⭐ Star this repository if you find it useful!**
