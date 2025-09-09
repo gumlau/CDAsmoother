@@ -1,0 +1,395 @@
+"""
+Training pipeline for CDAnet with physics-informed loss.
+"""
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader
+from torch.cuda.amp import autocast, GradScaler
+import numpy as np
+import os
+import time
+from typing import Dict, Optional, Tuple, List
+from collections import defaultdict
+
+from ..models.cdanet import CDAnet
+from ..training.losses import CDAnetLoss, RRMSELoss
+from ..data.data_loader import RBDataModule
+from ..utils.logger import Logger
+from ..utils.metrics import MetricsCalculator
+from ..config.config import ExperimentConfig
+
+
+class CDAnetTrainer:
+    """
+    Trainer class for CDAnet model.
+    
+    Args:
+        config: Experiment configuration
+        model: CDAnet model
+        data_module: Data module for loading datasets
+        logger: Logger for tracking experiments
+    """
+    
+    def __init__(self, config: ExperimentConfig, model: CDAnet, 
+                 data_module: RBDataModule, logger: Logger):
+        
+        self.config = config
+        self.model = model
+        self.data_module = data_module
+        self.logger = logger
+        
+        # Device setup
+        self.device = torch.device(config.training.device)
+        self.model.to(self.device)
+        
+        # Loss functions
+        self.loss_fn = CDAnetLoss(
+            lambda_pde=config.loss.lambda_pde,
+            Ra=config.loss.Ra,
+            Pr=config.loss.Pr,
+            Lx=config.loss.Lx,
+            Ly=config.loss.Ly,
+            regression_norm=config.loss.regression_norm,
+            pde_norm=config.loss.pde_norm
+        )
+        
+        self.rrmse_fn = RRMSELoss()
+        self.metrics_calc = MetricsCalculator()
+        
+        # Optimizer setup
+        self.optimizer = self._setup_optimizer()
+        self.scheduler = self._setup_scheduler()
+        
+        # Mixed precision training
+        self.scaler = GradScaler() if config.training.use_amp else None
+        
+        # Training state
+        self.current_epoch = 0
+        self.global_step = 0
+        self.best_val_loss = float('inf')
+        self.epochs_without_improvement = 0
+        
+        # Metrics tracking
+        self.train_metrics_history = defaultdict(list)
+        self.val_metrics_history = defaultdict(list)
+        
+        # Create output directories
+        os.makedirs(config.training.output_dir, exist_ok=True)
+        os.makedirs(config.training.checkpoint_dir, exist_ok=True)
+        
+        self.logger.info(f"Trainer initialized on device: {self.device}")
+        
+    def _setup_optimizer(self) -> optim.Optimizer:
+        """Setup optimizer based on configuration."""
+        config = self.config.optimizer
+        
+        if config.optimizer_type.lower() == 'sgd':
+            optimizer = optim.SGD(
+                self.model.parameters(),
+                lr=config.learning_rate,
+                momentum=config.momentum,
+                weight_decay=config.weight_decay
+            )
+        elif config.optimizer_type.lower() == 'adam':
+            optimizer = optim.Adam(
+                self.model.parameters(),
+                lr=config.learning_rate,
+                weight_decay=config.weight_decay
+            )
+        elif config.optimizer_type.lower() == 'adamw':
+            optimizer = optim.AdamW(
+                self.model.parameters(),
+                lr=config.learning_rate,
+                weight_decay=config.weight_decay
+            )
+        else:
+            raise ValueError(f"Unsupported optimizer: {config.optimizer_type}")
+            
+        return optimizer
+    
+    def _setup_scheduler(self) -> Optional[optim.lr_scheduler._LRScheduler]:
+        """Setup learning rate scheduler."""
+        config = self.config.optimizer
+        
+        if config.scheduler_type.lower() == 'plateau':
+            scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+                self.optimizer,
+                mode='min',
+                factor=config.factor,
+                patience=config.patience,
+                min_lr=config.min_lr,
+                verbose=True
+            )
+        elif config.scheduler_type.lower() == 'cosine':
+            scheduler = optim.lr_scheduler.CosineAnnealingLR(
+                self.optimizer,
+                T_max=self.config.training.num_epochs,
+                eta_min=config.min_lr
+            )
+        elif config.scheduler_type.lower() == 'step':
+            scheduler = optim.lr_scheduler.StepLR(
+                self.optimizer,
+                step_size=config.patience,
+                gamma=config.factor
+            )
+        else:
+            scheduler = None
+            
+        return scheduler
+    
+    def train(self):
+        """Main training loop."""
+        self.logger.info("Starting training...")
+        
+        # Log hyperparameters
+        hparams = self.config.to_dict()
+        self.logger.log_hyperparameters(hparams)
+        
+        # Log model summary
+        dummy_input_shape = [(self.config.data.clip_length, 4, 128, 128), (1000, 3)]
+        self.logger.log_model_summary(self.model, dummy_input_shape)
+        
+        training_start_time = time.time()
+        
+        try:
+            for epoch in range(self.current_epoch, self.config.training.num_epochs):
+                self.current_epoch = epoch
+                
+                # Training phase
+                train_metrics = self._train_epoch()
+                
+                # Validation phase
+                if epoch % self.config.training.val_interval == 0:
+                    val_metrics = self._validate_epoch()
+                    self.logger.log_validation_results(epoch, val_metrics)
+                    
+                    # Update learning rate scheduler
+                    if self.scheduler and isinstance(self.scheduler, optim.lr_scheduler.ReduceLROnPlateau):
+                        self.scheduler.step(val_metrics['loss'])
+                    elif self.scheduler:
+                        self.scheduler.step()
+                        
+                    # Check for improvement
+                    current_val_loss = val_metrics['loss']
+                    if current_val_loss < self.best_val_loss - self.config.training.min_delta:
+                        self.best_val_loss = current_val_loss
+                        self.epochs_without_improvement = 0
+                        
+                        # Save best model
+                        if self.config.training.save_best:
+                            self._save_checkpoint('best_model.pth', epoch, val_metrics, is_best=True)
+                    else:
+                        self.epochs_without_improvement += 1
+                        
+                    # Early stopping
+                    if (self.config.training.early_stopping and 
+                        self.epochs_without_improvement >= self.config.training.patience):
+                        self.logger.info(f"Early stopping triggered after {epoch + 1} epochs")
+                        break
+                
+                # Save periodic checkpoint
+                if epoch % self.config.training.checkpoint_interval == 0:
+                    checkpoint_name = f'checkpoint_epoch_{epoch}.pth'
+                    metrics = val_metrics if 'val_metrics' in locals() else train_metrics
+                    self._save_checkpoint(checkpoint_name, epoch, metrics)
+                    
+                # Log current learning rate
+                current_lr = self.optimizer.param_groups[0]['lr']
+                self.logger.log_learning_rate(current_lr)
+                
+        except KeyboardInterrupt:
+            self.logger.info("Training interrupted by user")
+        except Exception as e:
+            self.logger.error(f"Training failed with error: {e}")
+            raise
+        finally:
+            training_time = time.time() - training_start_time
+            self.logger.log_final_results({'best_val_loss': self.best_val_loss}, training_time)
+            
+    def _train_epoch(self) -> Dict[str, float]:
+        """Train for one epoch."""
+        self.model.train()
+        epoch_metrics = defaultdict(list)
+        
+        # Get training dataloader
+        Ra = self.config.data.Ra_numbers[0]
+        train_loader = self.data_module.get_dataloader(Ra, 'train')
+        
+        for batch_idx, batch in enumerate(train_loader):
+            # Move batch to device
+            batch = self._move_batch_to_device(batch)
+            
+            # Forward pass and loss computation
+            loss, metrics = self._compute_loss(batch, compute_pde=True)
+            
+            # Backward pass
+            if self.scaler:
+                self.scaler.scale(loss).backward()
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
+            else:
+                loss.backward()
+                self.optimizer.step()
+                
+            self.optimizer.zero_grad()
+            
+            # Update metrics
+            for key, value in metrics.items():
+                epoch_metrics[key].append(value)
+                
+            # Log progress
+            if batch_idx % self.config.training.log_interval == 0:
+                self.logger.log_training_progress(
+                    self.current_epoch, batch_idx, len(train_loader),
+                    metrics['total_loss'], {k: v for k, v in metrics.items() if k != 'total_loss'}
+                )
+                
+            self.global_step += 1
+            
+            # Limit batches per epoch if specified
+            if (self.config.training.clips_per_epoch and 
+                batch_idx >= self.config.training.clips_per_epoch // self.config.data.batch_size):
+                break
+                
+        # Average epoch metrics
+        avg_metrics = {key: np.mean(values) for key, values in epoch_metrics.items()}
+        
+        # Store metrics history
+        for key, value in avg_metrics.items():
+            self.train_metrics_history[f'train_{key}'].append(value)
+            
+        return avg_metrics
+    
+    def _validate_epoch(self) -> Dict[str, float]:
+        """Validate for one epoch."""
+        self.model.eval()
+        epoch_metrics = defaultdict(list)
+        
+        Ra = self.config.data.Ra_numbers[0]
+        val_loader = self.data_module.get_dataloader(Ra, 'val')
+        
+        with torch.no_grad():
+            for batch in val_loader:
+                batch = self._move_batch_to_device(batch)
+                
+                # Forward pass (without PDE loss for efficiency)
+                loss, metrics = self._compute_loss(batch, compute_pde=False)
+                
+                # Update metrics
+                for key, value in metrics.items():
+                    epoch_metrics[key].append(value)
+                    
+        # Average metrics
+        avg_metrics = {key: np.mean(values) for key, values in epoch_metrics.items()}
+        
+        # Store metrics history
+        for key, value in avg_metrics.items():
+            self.val_metrics_history[f'val_{key}'].append(value)
+            
+        return avg_metrics
+    
+    def _compute_loss(self, batch: Dict, compute_pde: bool = True) -> Tuple[torch.Tensor, Dict[str, float]]:
+        """Compute loss for a batch."""
+        low_res = batch['low_res']  # [B, 8, 4, H_low, W_low]
+        targets = batch['targets']  # [B, N, 4]
+        coords = batch['coords']   # [B, N, 3]
+        
+        if compute_pde and 'pde_coords' in batch:
+            pde_coords = batch['pde_coords']  # [B, N_pde, 3]
+            pde_targets = batch['pde_targets']  # [B, N_pde, 4]
+        else:
+            pde_coords = None
+            
+        # Forward pass through model
+        if self.config.training.use_amp:
+            with autocast():
+                if compute_pde and pde_coords is not None:
+                    predictions, derivatives = self.model.forward_with_derivatives(low_res, pde_coords)
+                else:
+                    predictions = self.model(low_res, coords)
+                    derivatives = None
+                    
+                # Compute loss
+                total_loss, loss_dict = self.loss_fn(predictions, targets, derivatives, coords)
+        else:
+            if compute_pde and pde_coords is not None:
+                predictions, derivatives = self.model.forward_with_derivatives(low_res, pde_coords)
+            else:
+                predictions = self.model(low_res, coords)
+                derivatives = None
+                
+            total_loss, loss_dict = self.loss_fn(predictions, targets, derivatives, coords)
+        
+        # Compute additional metrics
+        additional_metrics = self.rrmse_fn(predictions, targets)
+        loss_dict.update(additional_metrics)
+        
+        return total_loss, loss_dict
+    
+    def _move_batch_to_device(self, batch: Dict) -> Dict:
+        """Move batch tensors to device."""
+        device_batch = {}
+        for key, value in batch.items():
+            if torch.is_tensor(value):
+                device_batch[key] = value.to(self.device)
+            else:
+                device_batch[key] = value
+        return device_batch
+    
+    def _save_checkpoint(self, filename: str, epoch: int, metrics: Dict[str, float], is_best: bool = False):
+        """Save model checkpoint."""
+        checkpoint_path = os.path.join(self.config.training.checkpoint_dir, filename)
+        
+        checkpoint = {
+            'epoch': epoch,
+            'model_state_dict': self.model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'scheduler_state_dict': self.scheduler.state_dict() if self.scheduler else None,
+            'scaler_state_dict': self.scaler.state_dict() if self.scaler else None,
+            'best_val_loss': self.best_val_loss,
+            'global_step': self.global_step,
+            'config': self.config.to_dict(),
+            'metrics': metrics
+        }
+        
+        torch.save(checkpoint, checkpoint_path)
+        self.logger.save_checkpoint_info(checkpoint_path, epoch, metrics)
+        
+        if is_best:
+            self.logger.info(f"New best model saved with validation loss: {metrics.get('loss', 'N/A'):.6f}")
+    
+    def load_checkpoint(self, checkpoint_path: str, load_optimizer: bool = True):
+        """Load model checkpoint."""
+        if not os.path.exists(checkpoint_path):
+            raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+            
+        checkpoint = torch.load(checkpoint_path, map_location=self.device)
+        
+        # Load model state
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+        
+        # Load optimizer state
+        if load_optimizer and 'optimizer_state_dict' in checkpoint:
+            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            
+        # Load scheduler state
+        if load_optimizer and self.scheduler and 'scheduler_state_dict' in checkpoint:
+            if checkpoint['scheduler_state_dict'] is not None:
+                self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+                
+        # Load scaler state
+        if load_optimizer and self.scaler and 'scaler_state_dict' in checkpoint:
+            if checkpoint['scaler_state_dict'] is not None:
+                self.scaler.load_state_dict(checkpoint['scaler_state_dict'])
+        
+        # Load training state
+        self.current_epoch = checkpoint['epoch'] + 1
+        self.global_step = checkpoint.get('global_step', 0)
+        self.best_val_loss = checkpoint.get('best_val_loss', float('inf'))
+        
+        self.logger.info(f"Checkpoint loaded from {checkpoint_path}")
+        self.logger.info(f"Resuming from epoch {self.current_epoch}")
+        
+        return checkpoint
