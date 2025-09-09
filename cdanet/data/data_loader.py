@@ -87,8 +87,8 @@ class RBDataModule:
         self._create_data_loaders()
         
     def _find_data_file(self, Ra: float) -> Optional[str]:
-        """Find HDF5 data file for given Rayleigh number."""
-        # Look for files matching pattern
+        """Find HDF5 data file(s) for given Rayleigh number."""
+        # First try single files
         possible_names = [
             f"rb_data_Ra_{Ra:.0e}.h5",
             f"rb_data_Ra_{int(Ra)}.h5",
@@ -103,8 +103,17 @@ class RBDataModule:
             filepath = os.path.join(self.data_dir, name)
             if os.path.exists(filepath):
                 return filepath
+        
+        # Look for multiple run files pattern
+        import glob
+        pattern = os.path.join(self.data_dir, f"rb_data_Ra_{Ra:.0e}_run_*.h5")
+        run_files = glob.glob(pattern)
+        
+        if run_files:
+            # Return first file found - dataset will handle multiple runs
+            return run_files[0]
                 
-        # If no specific file found, return None
+        # If no files found, return None
         return None
         
     def _compose_transforms(self, transforms: List):
