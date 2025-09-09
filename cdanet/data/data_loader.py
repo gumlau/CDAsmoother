@@ -91,8 +91,11 @@ class RBDataModule:
         # Look for files matching pattern
         possible_names = [
             f"rb_data_Ra_{Ra:.0e}.h5",
-            f"rb_data_{Ra:.0e}.h5",
+            f"rb_data_Ra_{int(Ra)}.h5",
+            f"rb_data_{Ra:.0e}.h5", 
+            f"rb_data_{int(Ra)}.h5",
             f"Ra_{Ra:.0e}.h5",
+            f"Ra_{int(Ra)}.h5",
             "rb_simulation_data.h5"  # Default name
         ]
         
@@ -211,7 +214,7 @@ class RBDataModule:
             if step % 100 == 0:
                 print(f"Step {step}/{nt}")
                 
-            sim.step()
+            sim.step(step)
             
             # Collect data every few steps
             if step % 10 == 0:  # Collect every 10 steps

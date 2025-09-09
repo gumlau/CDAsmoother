@@ -21,10 +21,13 @@ class InceptionResNetBlock3D(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_sizes=[(1,1,1), (5,5,3), (9,9,5)]):
         super(InceptionResNetBlock3D, self).__init__()
         
-        # Three convolution branches
-        self.branch1 = self._make_branch(in_channels, out_channels//3, kernel_sizes[0])
-        self.branch2 = self._make_branch(in_channels, out_channels//3, kernel_sizes[1])
-        self.branch3 = self._make_branch(in_channels, out_channels//3, kernel_sizes[2])
+        # Three convolution branches - ensure total output matches out_channels
+        branch_channels = out_channels // 3
+        remaining_channels = out_channels - 2 * branch_channels
+        
+        self.branch1 = self._make_branch(in_channels, branch_channels, kernel_sizes[0])
+        self.branch2 = self._make_branch(in_channels, branch_channels, kernel_sizes[1])
+        self.branch3 = self._make_branch(in_channels, remaining_channels, kernel_sizes[2])
         
         # Residual connection - adjust channels if needed
         self.residual = nn.Identity() if in_channels == out_channels else \

@@ -130,6 +130,20 @@ evaluation_results/
 tensorboard/
 wandb/
 
+# Visualization outputs
+paper_style_visualization/
+perfect_paper_viz/
+demo_visualizations/
+*_comparison.png
+*_evolution.png
+*_analysis.png
+
+# Test files
+*test*.py
+minimal*.py
+simple*.py
+temp*.py
+
 # Temporary files
 *.tmp
 *.temp
