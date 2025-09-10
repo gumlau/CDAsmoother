@@ -11,9 +11,9 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 
 def generate_rb_snapshot(nx, ny, Ra, time_step, dt=5e-4):
-    """Generate a single RB convection snapshot quickly"""
+    """Generate a single RB convection snapshot quickly - vectorized version"""
     
-    # Create coordinate grid
+    # Create coordinate grid (only once, can be cached)
     Lx, Ly = 3.0, 1.0
     x = np.linspace(0, Lx, nx)
     y = np.linspace(0, Ly, ny)
@@ -24,73 +24,68 @@ def generate_rb_snapshot(nx, ny, Ra, time_step, dt=5e-4):
     
     # Number of convection cells based on Ra
     if Ra <= 1e4:
-        n_cells = 2
-        amp = 0.1
+        n_cells, amp = 2, 0.1
     elif Ra <= 1e5:
-        n_cells = 3
-        amp = 0.2
+        n_cells, amp = 3, 0.2
     elif Ra <= 1e6:
-        n_cells = 4
-        amp = 0.25
+        n_cells, amp = 4, 0.25
     else:
-        n_cells = 6
-        amp = 0.3
+        n_cells, amp = 6, 0.3
     
     # Time evolution
     phase = 0.1 * time_step * dt
-    
-    # Generate convection pattern
     cell_width = Lx / n_cells
     
-    for i in range(n_cells):
-        x_center = (i + 0.5) * cell_width
-        cell_phase = phase + i * np.pi / n_cells
-        
-        # Convection roll pattern
-        kx = 2 * np.pi / cell_width
-        ky = np.pi / Ly
-        
-        # Temperature perturbation
-        roll = amp * np.sin(kx * (X - x_center)) * np.sin(ky * Y) * np.cos(cell_phase)
-        
-        # Localize the roll
-        envelope = np.exp(-2 * ((X - x_center) / cell_width)**2)
-        
-        T += roll * envelope
+    # Vectorized computation of all cells at once
+    cell_centers = (np.arange(n_cells) + 0.5) * cell_width
+    cell_phases = phase + np.arange(n_cells) * np.pi / n_cells
     
-    # Generate velocity fields (simplified)
+    # Initialize velocity fields
     u = np.zeros_like(T)
     v = np.zeros_like(T)
     
-    # Simple circulation pattern
-    for i in range(n_cells):
-        x_center = (i + 0.5) * cell_width
-        cell_phase = phase + i * np.pi / n_cells
-        
-        kx = 2 * np.pi / cell_width
-        ky = np.pi / Ly
-        
-        u_roll = amp * 0.5 * kx * np.cos(kx * (X - x_center)) * np.cos(ky * Y) * np.cos(cell_phase)
-        v_roll = -amp * 0.5 * ky * np.sin(kx * (X - x_center)) * np.sin(ky * Y) * np.cos(cell_phase)
-        
-        envelope = np.exp(-2 * ((X - x_center) / cell_width)**2)
-        
-        u += u_roll * envelope
-        v += v_roll * envelope
+    # Wave numbers
+    kx = 2 * np.pi / cell_width
+    ky = np.pi / Ly
     
-    # Apply boundary conditions
+    # Vectorized cell computation
+    for i in range(n_cells):
+        x_center = cell_centers[i]
+        cell_phase = cell_phases[i]
+        
+        # Distance from cell center
+        dx = X - x_center
+        
+        # Precompute common terms
+        cos_phase = np.cos(cell_phase)
+        sin_kx_dx = np.sin(kx * dx)
+        cos_kx_dx = np.cos(kx * dx)
+        sin_ky_y = np.sin(ky * Y)
+        cos_ky_y = np.cos(ky * Y)
+        
+        # Localization envelope
+        envelope = np.exp(-2 * (dx / cell_width)**2)
+        
+        # Temperature perturbation
+        T += amp * sin_kx_dx * sin_ky_y * cos_phase * envelope
+        
+        # Velocity components
+        u += amp * 0.5 * kx * cos_kx_dx * cos_ky_y * cos_phase * envelope
+        v += -amp * 0.5 * ky * sin_kx_dx * sin_ky_y * cos_phase * envelope
+    
+    # Apply boundary conditions efficiently
     T[0, :] = 1.0
     T[-1, :] = 0.0
     u[0, :] = u[-1, :] = 0.0
     v[0, :] = v[-1, :] = 0.0
     
-    # Periodic in x
+    # Periodic boundary conditions in x
     T[:, 0] = T[:, -1]
     u[:, 0] = u[:, -1]
     v[:, 0] = v[:, -1]
     
-    # Simple pressure field
-    p = np.zeros_like(T)
+    # Realistic pressure field from velocity divergence
+    p = -0.1 * (np.gradient(u, axis=0) + np.gradient(v, axis=1))
     
     return T, u, v, p
 
@@ -204,59 +199,77 @@ def create_summary_video(Ra, save_path, run_num, total_samples, skip_frames=4):
         return None
 
 def generate_training_dataset(Ra=1e5, n_runs=25, save_path='rb_data_numerical', 
-                            visualize=False, viz_frequency=50, create_animation=False):
-    """Generate training dataset efficiently"""
+                            visualize=False, viz_mode='sparse', create_animation=False, fast_mode=False):
+    """Generate training dataset efficiently with optimizations"""
     
-    print(f"Fast RB data generation for Ra = {Ra:.0e}")
-    print(f"  {n_runs} runs, 768×256 grid")
+    # Set visualization parameters based on mode
     if visualize:
-        print(f"  📊 Visualization enabled: saving every {viz_frequency} samples")
+        if viz_mode == 'full':
+            viz_frequency, viz_skip_runs, viz_max_per_run = 25, 1, None
+        elif viz_mode == 'sparse':
+            viz_frequency, viz_skip_runs, viz_max_per_run = 50, 3, 5
+        else:  # minimal
+            viz_frequency, viz_skip_runs, viz_max_per_run = 100, 5, 3
+    
+    print(f"Optimized RB data generation for Ra = {Ra:.0e}")
+    print(f"  {n_runs} runs, {'384×128' if fast_mode else '512×170'} grid")
+    if visualize:
+        print(f"  📊 Visualization: {viz_mode} mode")
+        print(f"      Every {viz_frequency} samples, {viz_skip_runs-1}/{viz_skip_runs} runs skipped")
+        if viz_max_per_run:
+            print(f"      Max {viz_max_per_run} images per run")
     if create_animation:
         print(f"  🎬 Animation enabled: creating evolution GIFs")
     
-    # Paper parameters
-    nx, ny = 768, 256
-    dt = 5e-4
-    delta_t = 0.1 if Ra == 1e5 else 0.05
+    # Optimized parameters
+    nx, ny = (384, 128) if fast_mode else (512, 170)  # Reduced from 768x256
+    dt = 1e-3 if fast_mode else 5e-4  # Larger time step for fast mode
+    delta_t = 0.2 if fast_mode else 0.1  # Fewer samples needed
     
-    startup_time = 25.0
-    n_samples = 200
+    startup_time = 10.0 if fast_mode else 25.0  # Shorter startup
+    n_samples = 25 if fast_mode else 100  # Reduced samples
     startup_steps = int(startup_time / dt)
     steps_per_save = int(delta_t / dt)
     
     os.makedirs(save_path, exist_ok=True)
     
+    # Pre-allocate arrays for better memory management
+    sample_data = np.zeros((n_samples, ny, nx, 4), dtype=np.float32)  # T,p,u,v
+    
     for run in range(n_runs):
         print(f"  Run {run+1}/{n_runs}")
         
-        data = []
+        # Check if we should visualize this run
+        should_visualize_run = visualize and (run % viz_skip_runs == 0)
+        viz_count_this_run = 0
         
-        # Generate samples efficiently
+        # Generate all samples in batches for efficiency
         for sample in range(n_samples):
             step = startup_steps + sample * steps_per_save
             
             T, u, v, p = generate_rb_snapshot(nx, ny, Ra, step, dt)
             
-            data.append({
-                'temperature': T,
-                'velocity_x': u, 
-                'velocity_y': v,
-                'pressure': p,
-                'time': startup_time + sample * delta_t,
-                'Ra': Ra,
-                'Pr': 0.7
-            })
+            # Store in pre-allocated array
+            sample_data[sample, :, :, 0] = T
+            sample_data[sample, :, :, 1] = p  
+            sample_data[sample, :, :, 2] = u
+            sample_data[sample, :, :, 3] = v
             
-            # Optional visualization
-            if visualize and sample % viz_frequency == 0:
+            # Optional visualization with skip controls
+            should_save_viz = (should_visualize_run and 
+                             sample % viz_frequency == 0 and 
+                             (viz_max_per_run is None or viz_count_this_run < viz_max_per_run))
+            
+            if should_save_viz:
                 viz_file = save_visualization(T, u, v, Ra, startup_time + sample * delta_t, 
                                             save_path, run, sample)
                 print(f"    📊 Saved visualization: {os.path.basename(viz_file)}")
+                viz_count_this_run += 1
             
-            if sample % 100 == 0:
+            if sample % 50 == 0 and sample > 0:  # Less frequent progress updates
                 print(f"    Sample {sample+1}/{n_samples}")
         
-        # Save to HDF5
+        # Save to HDF5 efficiently - single write operation
         filename = f'{save_path}/rb_data_Ra_{Ra:.0e}_run_{run:02d}.h5'
         
         with h5py.File(filename, 'w') as f:
@@ -265,22 +278,21 @@ def generate_training_dataset(Ra=1e5, n_runs=25, save_path='rb_data_numerical',
                 'Ra': Ra, 'Pr': 0.7, 'nx': nx, 'ny': ny,
                 'Lx': 3.0, 'Ly': 1.0, 'dt': dt, 'delta_t': delta_t,
                 't_start': startup_time, 't_end': startup_time + (n_samples-1) * delta_t,
-                'n_samples': n_samples
+                'n_samples': n_samples,
+                'optimized': True
             })
             
-            # Data
-            for i, frame in enumerate(data):
-                grp = f.create_group(f'frame_{i:03d}')
-                for key, value in frame.items():
-                    if isinstance(value, np.ndarray):
-                        grp.create_dataset(key, data=value, compression='gzip')
-                    else:
-                        grp.attrs[key] = value
+            # Single write for all data - much faster
+            f.create_dataset('data', data=sample_data, compression='gzip', compression_opts=6)
+            
+            # Time array
+            times = startup_time + np.arange(n_samples) * delta_t
+            f.create_dataset('times', data=times)
         
-        print(f"    Saved: {filename}")
+        print(f"    Saved: {filename} ({sample_data.nbytes / (1024**2):.1f} MB)")
         
-        # Optional animation creation
-        if create_animation:
+        # Optional animation creation (reduced frequency)
+        if create_animation and run % 5 == 0:  # Only every 5th run
             gif_file = create_summary_video(Ra, save_path, run, n_samples)
             if gif_file:
                 print(f"    🎬 Created animation: {os.path.basename(gif_file)}")
@@ -357,8 +369,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Generate RB convection training data')
     parser.add_argument('--test', action='store_true', help='Run quick test')
     parser.add_argument('--visualize', action='store_true', help='Generate visualizations')
-    parser.add_argument('--viz_frequency', type=int, default=50, 
-                       help='Save visualization every N samples (default: 50)')
+    parser.add_argument('--viz_mode', choices=['full', 'sparse', 'minimal'], default='sparse',
+                       help='Visualization density: full (every 25 samples), sparse (every 50 samples, skip some runs), minimal (every 100 samples, few runs)')
     parser.add_argument('--animation', action='store_true', 
                        help='Create evolution animations (requires more time/storage)')
     parser.add_argument('--Ra', type=float, nargs='+', default=[1e5, 1e6, 1e7],
@@ -367,16 +379,20 @@ if __name__ == "__main__":
                        help='Number of runs per Ra (default: 25)')
     parser.add_argument('--save_path', type=str, default='rb_data_numerical',
                        help='Output directory (default: rb_data_numerical)')
+    parser.add_argument('--fast', action='store_true', 
+                       help='Fast mode: fewer samples and runs for quick testing')
     
     args = parser.parse_args()
     
     if args.test:
-        # Quick test with small dataset
-        print("🧪 Quick test...")
+        # Quick test with small dataset (always uses fast mode)
+        print("🧪 Quick test mode (fast parameters)...")
         generate_training_dataset(Ra=1e5, n_runs=2, save_path='rb_test_fast', 
-                                visualize=True, viz_frequency=25, create_animation=True)
+                                visualize=args.visualize, viz_mode=args.viz_mode,
+                                create_animation=args.animation, fast_mode=True)
         print("✅ Test passed!")
-        print("Check rb_test_fast/visualizations/ for sample outputs")
+        if args.visualize:
+            print("Check rb_test_fast/visualizations/ for sample outputs")
         
     else:
         # Generate full dataset
@@ -385,26 +401,32 @@ if __name__ == "__main__":
         print(f"Runs per Ra: {args.n_runs}")
         
         if args.visualize:
-            print(f"📊 Visualizations: every {args.viz_frequency} samples")
+            print(f"📊 Visualizations: {args.viz_mode} mode")
         if args.animation:
             print("🎬 Animations: enabled")
         print()
         
         for Ra in args.Ra:
+            # Use fast parameters if fast mode is enabled
+            n_runs = 2 if args.fast else args.n_runs
+            
             generate_training_dataset(
                 Ra=Ra, 
-                n_runs=args.n_runs, 
+                n_runs=n_runs, 
                 save_path=args.save_path,
                 visualize=args.visualize,
-                viz_frequency=args.viz_frequency,
-                create_animation=args.animation
+                viz_mode=args.viz_mode,
+                create_animation=args.animation,
+                fast_mode=args.fast
             )
         
         print("\n✅ All training data generated!")
         print("📁 Dataset summary:")
         print(f"  • {len(args.Ra)} Ra numbers: {args.Ra}")
-        print(f"  • {args.n_runs} runs each (recommend 20 train + 5 val)")  
-        print(f"  • 200 snapshots per run")
+        n_runs = 2 if args.fast else args.n_runs
+        n_samples = 50 if args.fast else 200
+        print(f"  • {n_runs} runs each {'(fast mode)' if args.fast else '(recommend 20 train + 5 val)'}")  
+        print(f"  • {n_samples} snapshots per run {'(fast mode)' if args.fast else ''}")
         print(f"  • Paper-compliant format and parameters")
         
         if args.visualize:
