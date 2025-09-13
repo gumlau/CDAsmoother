@@ -6,7 +6,6 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from torch.cuda.amp import autocast, GradScaler
 import numpy as np
 import os
 import time
@@ -40,8 +39,13 @@ class CDAnetTrainer:
         self.data_module = data_module
         self.logger = logger
         
-        # Device setup
-        self.device = torch.device(config.training.device)
+        # Device setup with automatic detection
+        self.device, self.device_type = self._setup_device(config.training.device)
+        
+        # Convert model to float32 for MPS compatibility
+        if self.device_type == 'mps':
+            self.model = self.model.float()
+        
         self.model.to(self.device)
         
         # Loss functions
@@ -62,8 +66,21 @@ class CDAnetTrainer:
         self.optimizer = self._setup_optimizer()
         self.scheduler = self._setup_scheduler()
         
-        # Mixed precision training
-        self.scaler = GradScaler() if config.training.use_amp else None
+        # Mixed precision training setup based on device
+        # Only enable AMP for CUDA (MPS support is limited, CPU doesn't benefit)
+        self.use_amp = config.training.use_amp and self.device_type == 'cuda'
+        self.scaler = None
+        
+        if self.use_amp:
+            from torch.cuda.amp import GradScaler
+            self.scaler = GradScaler()
+            self.logger.info("Mixed precision training enabled for CUDA")
+        elif config.training.use_amp and self.device_type != 'cuda':
+            self.logger.info(f"Mixed precision training disabled for {self.device_type} (only supported on CUDA)")
+            
+        # Set default dtype to float32 for MPS compatibility
+        if self.device_type == 'mps':
+            torch.set_default_dtype(torch.float32)
         
         # Training state
         self.current_epoch = 0
@@ -79,7 +96,41 @@ class CDAnetTrainer:
         os.makedirs(config.training.output_dir, exist_ok=True)
         os.makedirs(config.training.checkpoint_dir, exist_ok=True)
         
-        self.logger.info(f"Trainer initialized on device: {self.device}")
+        self.logger.info(f"Trainer initialized on device: {self.device} (type: {self.device_type})")
+        
+    def _setup_device(self, device_config: str) -> Tuple[torch.device, str]:
+        """Setup device with automatic detection for CUDA, MPS, or CPU."""
+        if device_config == 'auto':
+            if torch.cuda.is_available():
+                device = torch.device('cuda')
+                device_type = 'cuda'
+            elif torch.backends.mps.is_available():
+                device = torch.device('mps')
+                device_type = 'mps'
+            else:
+                device = torch.device('cpu')
+                device_type = 'cpu'
+        elif device_config == 'cuda':
+            if torch.cuda.is_available():
+                device = torch.device('cuda')
+                device_type = 'cuda'
+            else:
+                self.logger.warning("CUDA requested but not available, falling back to CPU")
+                device = torch.device('cpu')
+                device_type = 'cpu'
+        elif device_config == 'mps':
+            if torch.backends.mps.is_available():
+                device = torch.device('mps')
+                device_type = 'mps'
+            else:
+                self.logger.warning("MPS requested but not available, falling back to CPU")
+                device = torch.device('cpu')
+                device_type = 'cpu'
+        else:
+            device = torch.device('cpu')
+            device_type = 'cpu'
+            
+        return device, device_type
         
     def _setup_optimizer(self) -> optim.Optimizer:
         """Setup optimizer based on configuration."""
@@ -225,11 +276,13 @@ class CDAnetTrainer:
             loss, metrics = self._compute_loss(batch, compute_pde=True)
             
             # Backward pass
-            if self.scaler:
+            if self.device_type == 'cuda' and self.scaler:
+                # CUDA with GradScaler
                 self.scaler.scale(loss).backward()
                 self.scaler.step(self.optimizer)
                 self.scaler.update()
             else:
+                # MPS or CPU (no GradScaler)
                 loss.backward()
                 self.optimizer.step()
                 
@@ -302,28 +355,35 @@ class CDAnetTrainer:
         else:
             pde_coords = None
             
-        # Forward pass through model
-        if self.config.training.use_amp:
-            with autocast():
+        # Forward pass through model with appropriate autocast context
+        if self.use_amp and self.device_type == 'cuda':
+            # Use autocast only for CUDA
+            with torch.cuda.amp.autocast():
                 if compute_pde and pde_coords is not None:
                     predictions, derivatives = self.model.forward_with_derivatives(low_res, pde_coords)
+                    # Use pde_targets when computing PDE loss
+                    total_loss, loss_dict = self.loss_fn(predictions, pde_targets, derivatives, pde_coords)
                 else:
                     predictions = self.model(low_res, coords)
                     derivatives = None
-                    
-                # Compute loss
-                total_loss, loss_dict = self.loss_fn(predictions, targets, derivatives, coords)
+                    # Use regular targets for regression only
+                    total_loss, loss_dict = self.loss_fn(predictions, targets, derivatives, coords)
         else:
             if compute_pde and pde_coords is not None:
                 predictions, derivatives = self.model.forward_with_derivatives(low_res, pde_coords)
+                # Use pde_targets when computing PDE loss
+                total_loss, loss_dict = self.loss_fn(predictions, pde_targets, derivatives, pde_coords)
             else:
                 predictions = self.model(low_res, coords)
                 derivatives = None
-                
-            total_loss, loss_dict = self.loss_fn(predictions, targets, derivatives, coords)
+                # Use regular targets for regression only
+                total_loss, loss_dict = self.loss_fn(predictions, targets, derivatives, coords)
         
-        # Compute additional metrics
-        additional_metrics = self.rrmse_fn(predictions, targets)
+        # Compute additional metrics (use appropriate targets)
+        if compute_pde and pde_coords is not None and 'pde_targets' in locals():
+            additional_metrics = self.rrmse_fn(predictions, pde_targets)
+        else:
+            additional_metrics = self.rrmse_fn(predictions, targets)
         loss_dict.update(additional_metrics)
         
         return total_loss, loss_dict
@@ -333,6 +393,9 @@ class CDAnetTrainer:
         device_batch = {}
         for key, value in batch.items():
             if torch.is_tensor(value):
+                # Convert to float32 if using MPS (doesn't support float64)
+                if self.device_type == 'mps' and value.dtype == torch.float64:
+                    value = value.float()
                 device_batch[key] = value.to(self.device)
             else:
                 device_batch[key] = value

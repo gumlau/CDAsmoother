@@ -53,8 +53,8 @@ def parse_args():
     parser.add_argument('--resume', type=str, help='Path to checkpoint to resume from')
     
     # Hardware
-    parser.add_argument('--device', type=str, default='auto', choices=['auto', 'cuda', 'cpu'],
-                       help='Device to use for training')
+    parser.add_argument('--device', type=str, default='auto', choices=['auto', 'cuda', 'mps', 'cpu'],
+                       help='Device to use for training (auto detects cuda/mps/cpu)')
     parser.add_argument('--num_workers', type=int, default=4, help='Number of data loading workers')
     
     # Flags
@@ -91,7 +91,18 @@ def create_config_from_args(args) -> ExperimentConfig:
     
     config.training.num_epochs = args.num_epochs
     config.training.output_dir = args.output_dir
-    config.training.device = args.device
+    
+    # Auto-detect device if set to 'auto'
+    if args.device == 'auto':
+        if torch.cuda.is_available():
+            config.training.device = 'cuda'
+        elif torch.backends.mps.is_available():
+            config.training.device = 'mps'
+        else:
+            config.training.device = 'cpu'
+    else:
+        config.training.device = args.device
+    
     config.training.use_amp = not args.no_amp
     
     config.optimizer.learning_rate = args.learning_rate
