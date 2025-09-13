@@ -174,9 +174,13 @@ class RBDataset(Dataset):
         # Coordinates
         coords = self.coords_template.clone()  # [H*W*8, 3]
         
+        # Convert to expected format: [8, 4, H, W] -> [4, 8, H, W] for model input
+        low_res_model = low_res_clip.permute(1, 0, 2, 3)  # [4, 8, H_low, W_low]
+        high_res_model = high_res_clip.permute(1, 0, 2, 3)  # [4, 8, H_high, W_high]
+        
         sample = {
-            'low_res': low_res_clip,  # [8, 4, H_low, W_low]
-            'high_res': high_res_clip,  # [8, 4, H_high, W_high]
+            'low_res': low_res_model,  # [4, 8, H_low, W_low]
+            'high_res': high_res_model,  # [4, 8, H_high, W_high]
             'coords': coords,  # [H*W*8, 3]
             'targets': targets,  # [H*W*8, 4] 
             'Ra': self.Ra,

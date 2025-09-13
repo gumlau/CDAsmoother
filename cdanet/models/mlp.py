@@ -45,8 +45,13 @@ class PhysicsInformedMLP(nn.Module):
         layers = []
         prev_dim = input_dim
         
-        for hidden_dim in hidden_dims:
-            layers.append(nn.Linear(prev_dim + coord_dim, hidden_dim))  # Concatenate coords at each layer
+        for i, hidden_dim in enumerate(hidden_dims):
+            if i == 0:
+                # First layer: input is already features + coords
+                layers.append(nn.Linear(prev_dim, hidden_dim))
+            else:
+                # Later layers: concatenate coords again
+                layers.append(nn.Linear(prev_dim + coord_dim, hidden_dim))
             prev_dim = hidden_dim
             
         # Output layer

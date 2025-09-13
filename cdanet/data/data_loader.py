@@ -11,6 +11,29 @@ from typing import Dict, List, Tuple, Optional
 from .dataset import RBDataset, RandomCoordinateSampler, DataNormalizer
 
 
+class ChainedTransform:
+    """Picklable transform composition for two transforms."""
+    def __init__(self, first, second):
+        self.first = first
+        self.second = second
+        
+    def __call__(self, sample):
+        sample = self.first(sample)
+        sample = self.second(sample)
+        return sample
+
+
+class ComposedTransform:
+    """Picklable transform composition for multiple transforms."""
+    def __init__(self, transforms):
+        self.transforms = transforms
+        
+    def __call__(self, sample):
+        for transform in self.transforms:
+            sample = transform(sample)
+        return sample
+
+
 class RBDataModule:
     """
     Data module for Rayleigh-Bénard convection datasets.
@@ -87,8 +110,8 @@ class RBDataModule:
         self._create_data_loaders()
         
     def _find_data_file(self, Ra: float) -> Optional[str]:
-        """Find HDF5 data file for given Rayleigh number."""
-        # Look for files matching pattern
+        """Find HDF5 data file(s) for given Rayleigh number."""
+        # First try single files
         possible_names = [
             f"rb_data_Ra_{Ra:.0e}.h5",
             f"rb_data_Ra_{int(Ra)}.h5",
@@ -103,17 +126,26 @@ class RBDataModule:
             filepath = os.path.join(self.data_dir, name)
             if os.path.exists(filepath):
                 return filepath
+        
+        # Look for multiple run files pattern
+        import glob
+        pattern = os.path.join(self.data_dir, f"rb_data_Ra_{Ra:.0e}_run_*.h5")
+        run_files = glob.glob(pattern)
+        
+        if run_files:
+            # Return first file found - dataset will handle multiple runs
+            return run_files[0]
                 
-        # If no specific file found, return None
+        # If no files found, return None
         return None
         
     def _compose_transforms(self, transforms: List):
         """Compose multiple transforms."""
-        def composed_transform(sample):
-            for transform in transforms:
-                sample = transform(sample)
-            return sample
-        return composed_transform
+        return ComposedTransform(transforms)
+    
+    def _create_chained_transform(self, first_transform, second_transform):
+        """Create a chained transform that can be pickled."""
+        return ChainedTransform(first_transform, second_transform)
         
     def _setup_normalizer(self, train_dataset: RBDataset):
         """Setup data normalizer using training data statistics."""
@@ -140,12 +172,8 @@ class RBDataModule:
             if current_transform is None:
                 dataset.transform = self.normalizer
             else:
-                # Chain transforms
-                def chained_transform(sample):
-                    sample = current_transform(sample)
-                    sample = self.normalizer(sample)
-                    return sample
-                dataset.transform = chained_transform
+                # Chain transforms using a class method (picklable)
+                dataset.transform = self._create_chained_transform(current_transform, self.normalizer)
                 
     def _create_data_loaders(self):
         """Create data loaders for all datasets."""

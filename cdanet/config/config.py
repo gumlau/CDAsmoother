@@ -13,7 +13,7 @@ class ModelConfig:
     # U-Net parameters
     in_channels: int = 4  # T, p, u, v
     feature_channels: int = 256
-    base_channels: int = 64
+    base_channels: int = 32
     
     # MLP parameters  
     mlp_hidden_dims: List[int] = field(default_factory=lambda: [512, 512, 512, 512])
