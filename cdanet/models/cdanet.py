@@ -21,16 +21,18 @@ class CDAnet(nn.Module):
         activation: Activation function for MLP
         coord_dim: Dimension of coordinates (3 for x, y, t)
         output_dim: Number of output variables (4 for T, p, u, v)
+        base_channels: Base number of channels for UNet3D first layer
     """
     
     def __init__(self, in_channels=4, feature_channels=256, mlp_hidden_dims=[512, 512, 512, 512],
-                 activation='softplus', coord_dim=3, output_dim=4):
+                 activation='softplus', coord_dim=3, output_dim=4, base_channels=32, **kwargs):
         super(CDAnet, self).__init__()
         
         # Feature extractor (3D U-Net)
         self.feature_extractor = UNet3D(
             in_channels=in_channels,
-            feature_channels=feature_channels
+            feature_channels=feature_channels,
+            base_channels=base_channels
         )
         
         # Physics-informed MLP

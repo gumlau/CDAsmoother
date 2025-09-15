@@ -71,12 +71,14 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
         config_dict = checkpoint['config']
         model_config = config_dict['model']
     else:
-        # Default config
+        # Default config matching working_example_checkpoint.pth
         model_config = {
             'in_channels': 4,
-            'feature_channels': 256,
-            'mlp_hidden_dims': [512, 512, 512, 512],
-            'activation': 'softplus'
+            'feature_channels': 128,  # Matches working example
+            'mlp_hidden_dims': [256, 256],  # Matches working example
+            'activation': 'softplus',
+            'coord_dim': 3,
+            'output_dim': 4
         }
     
     model = CDAnet(**model_config)
