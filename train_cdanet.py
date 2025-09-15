@@ -36,30 +36,30 @@ def parse_args():
     parser.add_argument('--spatial_downsample', type=int, default=4, help='Spatial downsampling factor')
     parser.add_argument('--temporal_downsample', type=int, default=4, help='Temporal downsampling factor')
     
-    # Training parameters
-    parser.add_argument('--batch_size', type=int, default=32, help='Batch size')
+    # Training parameters (optimized for CUDA)
+    parser.add_argument('--batch_size', type=int, default=16, help='Batch size (optimized for GPU)')
     parser.add_argument('--num_epochs', type=int, default=100, help='Number of training epochs')
-    parser.add_argument('--learning_rate', type=float, default=0.1, help='Learning rate')
+    parser.add_argument('--learning_rate', type=float, default=0.05, help='Learning rate')
     parser.add_argument('--lambda_pde', type=float, default=0.01, help='PDE loss weight')
-    
-    # Model parameters
-    parser.add_argument('--feature_channels', type=int, default=256, help='Feature channels in U-Net')
+
+    # Model parameters (optimized for GPU)
+    parser.add_argument('--feature_channels', type=int, default=512, help='Feature channels in U-Net')
     parser.add_argument('--mlp_layers', type=int, default=4, help='Number of MLP hidden layers')
     parser.add_argument('--mlp_width', type=int, default=512, help='Width of MLP hidden layers')
-    
+
     # Output and logging
     parser.add_argument('--output_dir', type=str, default='./outputs', help='Output directory')
     parser.add_argument('--experiment_name', type=str, help='Experiment name (auto-generated if not provided)')
     parser.add_argument('--resume', type=str, help='Path to checkpoint to resume from')
-    
-    # Hardware
-    parser.add_argument('--device', type=str, default='auto', choices=['auto', 'cuda', 'mps', 'cpu'],
-                       help='Device to use for training (auto detects cuda/mps/cpu)')
-    parser.add_argument('--num_workers', type=int, default=4, help='Number of data loading workers')
+
+    # Hardware (defaults to CUDA)
+    parser.add_argument('--device', type=str, default='cuda', choices=['auto', 'cuda', 'mps', 'cpu'],
+                       help='Device to use for training (defaults to CUDA)')
+    parser.add_argument('--num_workers', type=int, default=8, help='Number of data loading workers')
     
     # Flags
     parser.add_argument('--no_amp', action='store_true', help='Disable automatic mixed precision')
-    parser.add_argument('--generate_data', action='store_true', help='Generate synthetic data if not found')
+    parser.add_argument('--no_data_gen', action='store_true', help='Disable automatic data generation')
     parser.add_argument('--debug', action='store_true', help='Enable debug mode')
     
     return parser.parse_args()
@@ -92,13 +92,19 @@ def create_config_from_args(args) -> ExperimentConfig:
     config.training.num_epochs = args.num_epochs
     config.training.output_dir = args.output_dir
     
-    # Auto-detect device if set to 'auto'
+    # Set device (default to CUDA, fallback if needed)
     if args.device == 'auto':
         if torch.cuda.is_available():
             config.training.device = 'cuda'
         elif torch.backends.mps.is_available():
             config.training.device = 'mps'
         else:
+            config.training.device = 'cpu'
+    elif args.device == 'cuda':
+        if torch.cuda.is_available():
+            config.training.device = 'cuda'
+        else:
+            print("Warning: CUDA not available, falling back to CPU")
             config.training.device = 'cpu'
     else:
         config.training.device = args.device
@@ -140,9 +146,24 @@ def setup_data(config: ExperimentConfig, generate_if_missing: bool = False) -> R
     data_file = data_module._find_data_file(Ra)
     
     if data_file is None and generate_if_missing:
-        print(f"Data file not found for Ra={Ra}, generating synthetic data...")
-        data_file = os.path.join(config.data.data_dir, f'rb_data_Ra_{Ra:.0e}.h5')
-        data_module.create_synthetic_data(data_file, Ra=Ra)
+        print(f"Data file not found for Ra={Ra}, generating RB simulation data...")
+        print("This may take a few minutes...")
+        # Use rb_simulation.py to generate real data
+        import subprocess
+        result = subprocess.run([
+            'python3', 'rb_simulation.py',
+            '--Ra', str(Ra),
+            '--n_runs', '10'
+        ], capture_output=True, text=True)
+
+        if result.returncode != 0:
+            print(f"Warning: RB simulation failed. Generating synthetic data as fallback...")
+            data_file = os.path.join(config.data.data_dir, f'rb_data_Ra_{Ra:.0e}.h5')
+            data_module.create_synthetic_data(data_file, Ra=Ra)
+        else:
+            print("RB simulation data generated successfully!")
+            # Convert to consolidated format
+            subprocess.run(['python3', 'convert_rb_data.py'], capture_output=True)
     
     # Setup data module
     data_module.setup(config.data.Ra_numbers)
@@ -169,9 +190,10 @@ def main():
     print(f"Output directory: {config.training.output_dir}")
     print("=" * 60)
     
-    # Setup data
+    # Setup data (auto-generate by default)
     print("Setting up data...")
-    data_module = setup_data(config, generate_if_missing=args.generate_data)
+    generate_data = not args.no_data_gen  # Generate by default unless disabled
+    data_module = setup_data(config, generate_if_missing=generate_data)
     
     # Print data info
     data_info = data_module.get_dataset_info()
