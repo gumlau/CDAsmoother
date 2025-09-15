@@ -63,16 +63,20 @@ CDAsmoother/
 │   ├── utils/                       # Utility functions
 │   │   ├── __init__.py
 │   │   ├── logger.py               # Experiment logging
-│   │   └── metrics.py              # Evaluation metrics & visualization
+│   │   ├── metrics.py              # Evaluation metrics & visualization
+│   │   └── rb_visualization.py     # Rayleigh-Bénard visualization tools
 │   ├── config/                      # Configuration management
 │   │   ├── __init__.py
 │   │   └── config.py               # Experiment configurations
 │   └── __init__.py
-├── train_cdanet.py                  # Training script
+├── train_cdanet.py                  # Main training script
+├── minimal_train.py                 # Minimal training example (verification)
+├── working_training_example.py      # Working pipeline demonstration
+├── verify_pipeline.py               # Complete pipeline verification
 ├── evaluate_cdanet.py               # Evaluation script
+├── visualize_results.py             # Result visualization script
 ├── rb_simulation.py                 # Optimized RB data generator
 ├── convert_rb_data.py               # Data format converter
-├── compare_sim.py                   # Simulation comparison utilities
 ├── requirements.txt                 # Python dependencies
 └── README.md                        # This file
 ```
@@ -104,6 +108,46 @@ conda activate cdasmoother
 - **Logging**: TensorBoard, Weights & Biases (optional)
 - **Data**: scikit-learn, pandas
 
+## Pipeline Verification
+
+Before running full training, you can verify that all components are working correctly:
+
+### 1. Quick Pipeline Test
+```bash
+# Run complete pipeline verification
+python3 verify_pipeline.py
+
+# Run minimal training example (1 epoch, small batch)
+python3 minimal_train.py
+
+# Run working training example with real data
+python3 working_training_example.py
+```
+
+The verification scripts will:
+- ✅ Test data loading from RB simulation files
+- ✅ Verify CDAnet model creation and forward pass
+- ✅ Test training step with loss computation and backpropagation
+- ✅ Verify checkpoint saving and loading
+- ✅ Save verification results to `./outputs/`
+
+### 2. Verify Training Pipeline
+```bash
+# This runs a complete but minimal training loop
+python3 working_training_example.py
+```
+
+Expected output:
+```
+🚀 CDAsmoother Working Training Example
+✅ Data loaded: X batches available
+✅ Model created: XXX,XXX parameters
+✅ Forward pass successful!
+✅ Backward pass successful!
+✅ Checkpoint saved: ./checkpoints/working_example_checkpoint.pth
+🎉 SUCCESS! CDAsmoother Pipeline is Working!
+```
+
 ## Quick Start
 
 ### 1. Generate Training Data
@@ -134,12 +178,23 @@ dm.create_synthetic_data('./rb_data_numerical/rb_data_Ra_1e5.h5', Ra=1e5, nx=768
 ```
 
 ### 2. Train CDAnet
+
+#### Option A: Quick Training Test (Recommended for first run)
+```bash
+# Run minimal training to verify everything works (1 epoch)
+python3 minimal_train.py
+
+# Run working example with real data (quick verification)
+python3 working_training_example.py
+```
+
+#### Option B: Full Training
 ```bash
 # Basic training with default parameters
-python train_cdanet.py --Ra 1e5 --spatial_downsample 4 --temporal_downsample 4
+python3 train_cdanet.py --Ra 1e5 --spatial_downsample 4 --temporal_downsample 4
 
 # Advanced training with custom parameters
-python train_cdanet.py \
+python3 train_cdanet.py \
     --Ra 1e6 \
     --spatial_downsample 2 \
     --temporal_downsample 2 \
@@ -149,22 +204,49 @@ python train_cdanet.py \
     --lambda_pde 0.1 \
     --feature_channels 512 \
     --experiment_name "my_experiment"
+
+# CPU-friendly training (smaller model)
+python3 train_cdanet.py \
+    --Ra 1e5 \
+    --spatial_downsample 4 \
+    --temporal_downsample 4 \
+    --batch_size 2 \
+    --feature_channels 128 \
+    --mlp_width 256 \
+    --device cpu
 ```
 
 ### 3. Evaluate Model
 ```bash
 # Standard evaluation
-python evaluate_cdanet.py \
+python3 evaluate_cdanet.py \
     --checkpoint checkpoints/best_model.pth \
     --output_dir evaluation_results
 
 # Generalization testing
-python evaluate_cdanet.py \
+python3 evaluate_cdanet.py \
     --checkpoint checkpoints/best_model.pth \
     --generalization \
     --test_ra 7e5 8e5 9e5 1.1e6 1.2e6 \
     --temporal_evolution \
     --physics_analysis
+```
+
+### 4. Visualize Results
+```bash
+# Create publication-quality visualizations from trained model
+python3 visualize_results.py \
+    --checkpoint checkpoints/best_model.pth \
+    --data_dir ./rb_data_numerical \
+    --variable T \
+    --output_dir ./visualizations
+
+# Create demo visualization with synthetic data
+python3 visualize_results.py --demo --output_dir ./demo_viz
+
+# Visualize different variables
+python3 visualize_results.py --demo --variable u --output_dir ./velocity_viz
+python3 visualize_results.py --demo --variable T --output_dir ./temperature_viz
 ```
 
 ## 🔧 Configuration
@@ -174,9 +256,9 @@ The project includes predefined configurations matching the original paper:
 
 ```bash
 # Use paper configurations
-python train_cdanet.py --preset Ra_1e5_ds_4_4   # Ra=10^5, γ_s=4, γ_t=4
-python train_cdanet.py --preset Ra_1e6_ds_2_2   # Ra=10^6, γ_s=2, γ_t=2
-python train_cdanet.py --preset Ra_1e7_ds_2_2   # Ra=10^7, γ_s=2, γ_t=2
+python3 train_cdanet.py --preset Ra_1e5_ds_4_4   # Ra=10^5, γ_s=4, γ_t=4
+python3 train_cdanet.py --preset Ra_1e6_ds_2_2   # Ra=10^6, γ_s=2, γ_t=2
+python3 train_cdanet.py --preset Ra_1e7_ds_2_2   # Ra=10^7, γ_s=2, γ_t=2
 ```
 
 ### Custom Configuration
@@ -208,7 +290,7 @@ loss:
 
 Then run:
 ```bash
-python train_cdanet.py --config config.yaml
+python3 train_cdanet.py --config config.yaml
 ```
 
 ## Results & Performance
@@ -367,6 +449,71 @@ python3 convert_rb_data.py
 
 # 3. Verify data quality
 ls -lh rb_data_numerical/rb_data_Ra_*.h5
+```
+
+## 🔍 Troubleshooting & Tips
+
+### Before Training
+1. **Always verify the pipeline first**:
+   ```bash
+   python3 verify_pipeline.py
+   ```
+
+2. **Start with minimal training**:
+   ```bash
+   python3 working_training_example.py
+   ```
+
+3. **Check data availability**:
+   ```bash
+   ls -la ./rb_data_numerical/
+   # Should contain rb_data_Ra_*.h5 files
+   ```
+
+### Training Issues
+
+#### Memory Issues (CPU Training)
+```bash
+# Use smaller model and batch size
+python3 train_cdanet.py \
+    --Ra 1e5 \
+    --batch_size 1 \
+    --feature_channels 64 \
+    --mlp_width 128 \
+    --device cpu \
+    --num_workers 0
+```
+
+#### GPU Issues
+```bash
+# Auto-detect device (cuda/mps/cpu)
+python3 train_cdanet.py --device auto
+
+# Force CPU if GPU has issues
+python3 train_cdanet.py --device cpu
+```
+
+#### Data Loading Issues
+```bash
+# Generate data if missing
+python3 train_cdanet.py --generate_data --Ra 1e5
+
+# Or manually generate RB data
+python3 rb_simulation.py --test --visualize
+```
+
+### Performance Optimization
+- **CPU Training**: Use `--feature_channels 64-128` and `--batch_size 1-2`
+- **GPU Training**: Use `--feature_channels 256-512` and `--batch_size 8-32`
+- **Quick Testing**: Use `minimal_train.py` or `working_training_example.py`
+- **Debugging**: Add `--debug` flag to training script
+
+### Output Files
+```
+./checkpoints/           # Model checkpoints
+./outputs/              # Training logs and results
+./visualizations/       # Generated plots
+./logs/                # TensorBoard logs
 ```
 
 ## Advanced Usage
