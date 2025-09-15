@@ -463,7 +463,11 @@ class CDAnetTrainer:
         self.logger.save_checkpoint_info(checkpoint_path, epoch, metrics)
         
         if is_best:
-            self.logger.info(f"New best model saved with validation loss: {metrics.get('loss', 'N/A'):.6f}")
+            val_loss = metrics.get('total_loss', metrics.get('loss', float('inf')))
+            if isinstance(val_loss, (int, float)) and not (np.isnan(val_loss) or np.isinf(val_loss)):
+                self.logger.info(f"New best model saved with validation loss: {val_loss:.6f}")
+            else:
+                self.logger.info(f"New best model saved with validation loss: {val_loss}")
     
     def load_checkpoint(self, checkpoint_path: str, load_optimizer: bool = True):
         """Load model checkpoint."""
