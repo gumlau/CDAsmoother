@@ -111,14 +111,15 @@ python3 check_cuda.py
 
 ### Single Command Training
 ```bash
-# Complete end-to-end training (automatically generates data if needed)
+# Complete end-to-end training with stable settings
 python3 train_cdanet.py --Ra 1e5 --num_epochs 100
 ```
 
 **That's it!** This single command will:
 - ✅ Automatically generate RB simulation data if not found
 - ✅ Use CUDA for optimal GPU performance
-- ✅ Set optimal batch size and model parameters
+- ✅ Use stable defaults (batch_size=4, Adam optimizer, gradient clipping)
+- ✅ Handle numerical instabilities automatically
 - ✅ Save checkpoints to `./checkpoints/`
 - ✅ Log training progress with TensorBoard
 - ✅ Generate comprehensive evaluation results

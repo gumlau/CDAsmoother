@@ -53,7 +53,7 @@ class DataConfig:
 class LossConfig:
     """Configuration for loss functions."""
     # PDE loss weight
-    lambda_pde: float = 0.01
+    lambda_pde: float = 0.0001  # Reduced for stability
     
     # Loss norms
     regression_norm: str = 'l1'  # 'l1' or 'l2'
@@ -70,8 +70,8 @@ class LossConfig:
 class OptimizerConfig:
     """Configuration for optimizer and learning rate scheduling."""
     # Optimizer
-    optimizer_type: str = 'sgd'  # 'sgd', 'adam', 'adamw'
-    learning_rate: float = 0.1
+    optimizer_type: str = 'adam'  # 'sgd', 'adam', 'adamw' (adam is more stable)
+    learning_rate: float = 0.0001  # More stable learning rate
     momentum: float = 0.9
     weight_decay: float = 1e-4
     

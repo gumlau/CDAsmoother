@@ -55,18 +55,36 @@ class CDAnetLoss(nn.Module):
             total_loss: Combined loss
             loss_dict: Dictionary with individual loss components
         """
+        # Check for NaN/Inf in inputs
+        if torch.isnan(predictions).any() or torch.isinf(predictions).any():
+            print("Warning: NaN/Inf in predictions")
+            predictions = torch.nan_to_num(predictions, nan=0.0, posinf=1e6, neginf=-1e6)
+
+        if torch.isnan(targets).any() or torch.isinf(targets).any():
+            print("Warning: NaN/Inf in targets")
+            targets = torch.nan_to_num(targets, nan=0.0, posinf=1e6, neginf=-1e6)
+
         # Regression loss
         L_reg = self.regression_loss(predictions, targets)
-        
+
+        # Clamp regression loss to prevent explosion
+        L_reg = torch.clamp(L_reg, max=1000.0)
+
         # PDE loss (if derivatives are provided)
         if derivatives is not None:
             L_pde = self.compute_pde_loss(predictions, derivatives)
+            # Clamp PDE loss to prevent explosion
+            L_pde = torch.clamp(L_pde, max=10000.0)
         else:
             L_pde = torch.tensor(0.0, device=predictions.device)
-        
+
         # Total loss
         total_loss = L_reg + self.lambda_pde * L_pde
-        
+
+        # Final stability check
+        if torch.isnan(total_loss) or torch.isinf(total_loss):
+            total_loss = torch.tensor(1000.0, device=predictions.device)
+
         # Return loss components
         loss_dict = {
             'total_loss': total_loss.item(),

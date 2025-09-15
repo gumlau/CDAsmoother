@@ -215,15 +215,21 @@ class CDAnetTrainer:
                 if epoch % self.config.training.val_interval == 0:
                     val_metrics = self._validate_epoch()
                     self.logger.log_validation_results(epoch, val_metrics)
-                    
+
+                    # Check if validation returned valid metrics
+                    val_loss = val_metrics.get('total_loss', float('inf'))
+                    if np.isnan(val_loss) or np.isinf(val_loss):
+                        self.logger.warning(f"Invalid validation loss: {val_loss}. Skipping scheduler step.")
+                        val_loss = float('inf')
+
                     # Update learning rate scheduler
                     if self.scheduler and isinstance(self.scheduler, optim.lr_scheduler.ReduceLROnPlateau):
-                        self.scheduler.step(val_metrics['loss'])
+                        self.scheduler.step(val_loss)
                     elif self.scheduler:
                         self.scheduler.step()
-                        
+
                     # Check for improvement
-                    current_val_loss = val_metrics['loss']
+                    current_val_loss = val_loss
                     if current_val_loss < self.best_val_loss - self.config.training.min_delta:
                         self.best_val_loss = current_val_loss
                         self.epochs_without_improvement = 0
@@ -275,17 +281,32 @@ class CDAnetTrainer:
             # Forward pass and loss computation
             loss, metrics = self._compute_loss(batch, compute_pde=True)
             
+            # Check for NaN loss before backward pass
+            if torch.isnan(loss) or torch.isinf(loss):
+                self.logger.warning(f"Invalid loss detected: {loss.item()}. Skipping backward pass.")
+                self.optimizer.zero_grad()
+                continue
+
             # Backward pass
             if self.device_type == 'cuda' and self.scaler:
                 # CUDA with GradScaler
                 self.scaler.scale(loss).backward()
+
+                # Gradient clipping
+                self.scaler.unscale_(self.optimizer)
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+
                 self.scaler.step(self.optimizer)
                 self.scaler.update()
             else:
                 # MPS or CPU (no GradScaler)
                 loss.backward()
+
+                # Gradient clipping
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+
                 self.optimizer.step()
-                
+
             self.optimizer.zero_grad()
             
             # Update metrics
@@ -334,13 +355,34 @@ class CDAnetTrainer:
                 for key, value in metrics.items():
                     epoch_metrics[key].append(value)
                     
-        # Average metrics
-        avg_metrics = {key: np.mean(values) for key, values in epoch_metrics.items()}
-        
+        # Average metrics with NaN handling
+        avg_metrics = {}
+        for key, values in epoch_metrics.items():
+            if values:  # Check if list is not empty
+                mean_val = np.mean(values)
+                # Replace NaN/Inf with large values for loss-based metrics
+                if np.isnan(mean_val) or np.isinf(mean_val):
+                    if 'loss' in key.lower():
+                        avg_metrics[key] = float('inf')
+                    else:
+                        avg_metrics[key] = float('nan')
+                else:
+                    avg_metrics[key] = mean_val
+            else:
+                # No values computed, set defaults
+                if 'loss' in key.lower():
+                    avg_metrics[key] = float('inf')
+                else:
+                    avg_metrics[key] = float('nan')
+
+        # Ensure 'total_loss' key exists
+        if 'total_loss' not in avg_metrics:
+            avg_metrics['total_loss'] = float('inf')
+
         # Store metrics history
         for key, value in avg_metrics.items():
             self.val_metrics_history[f'val_{key}'].append(value)
-            
+
         return avg_metrics
     
     def _compute_loss(self, batch: Dict, compute_pde: bool = True) -> Tuple[torch.Tensor, Dict[str, float]]:

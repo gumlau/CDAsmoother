@@ -36,16 +36,16 @@ def parse_args():
     parser.add_argument('--spatial_downsample', type=int, default=4, help='Spatial downsampling factor')
     parser.add_argument('--temporal_downsample', type=int, default=4, help='Temporal downsampling factor')
     
-    # Training parameters (optimized for CUDA)
-    parser.add_argument('--batch_size', type=int, default=16, help='Batch size (optimized for GPU)')
+    # Training parameters (stable defaults)
+    parser.add_argument('--batch_size', type=int, default=4, help='Batch size (stable for GPU)')
     parser.add_argument('--num_epochs', type=int, default=100, help='Number of training epochs')
-    parser.add_argument('--learning_rate', type=float, default=0.05, help='Learning rate')
-    parser.add_argument('--lambda_pde', type=float, default=0.01, help='PDE loss weight')
+    parser.add_argument('--learning_rate', type=float, default=0.0001, help='Learning rate (stable)')
+    parser.add_argument('--lambda_pde', type=float, default=0.0001, help='PDE loss weight (stable)')
 
-    # Model parameters (optimized for GPU)
-    parser.add_argument('--feature_channels', type=int, default=512, help='Feature channels in U-Net')
-    parser.add_argument('--mlp_layers', type=int, default=4, help='Number of MLP hidden layers')
-    parser.add_argument('--mlp_width', type=int, default=512, help='Width of MLP hidden layers')
+    # Model parameters (stable for GPU)
+    parser.add_argument('--feature_channels', type=int, default=256, help='Feature channels in U-Net')
+    parser.add_argument('--mlp_layers', type=int, default=3, help='Number of MLP hidden layers')
+    parser.add_argument('--mlp_width', type=int, default=256, help='Width of MLP hidden layers')
 
     # Output and logging
     parser.add_argument('--output_dir', type=str, default='./outputs', help='Output directory')
