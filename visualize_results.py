@@ -119,16 +119,45 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
             
             # Get predictions
             predictions = model(low_res, coords)
-            
+
             # Reshape for visualization
             B, N, C = predictions.shape
-            T = 8  # clip length
-            H = int(np.sqrt(N // T))
-            W = H
-            
-            # Reshape to [T, H, W, C]
-            pred_reshaped = predictions.cpu().view(B, H, W, T, C).permute(0, 3, 1, 2, 4)
-            target_reshaped = targets.cpu().view(B, H, W, T, C).permute(0, 3, 1, 2, 4)
+            target_B, target_N, target_C = targets.shape
+
+            # Make sure predictions and targets have the same N
+            assert N == target_N, f"Prediction N ({N}) != target N ({target_N})"
+
+            # The key insight: N represents the total number of high-resolution points
+            # We need to figure out the spatial-temporal structure from this
+            T = 8  # clip length (this should match the data)
+
+            # Calculate spatial points per timestep
+            spatial_points_per_timestep = N // T
+
+            # Find the factorization H x W = spatial_points_per_timestep
+            factors = []
+            for i in range(1, int(spatial_points_per_timestep**0.5) + 1):
+                if spatial_points_per_timestep % i == 0:
+                    factors.append((i, spatial_points_per_timestep // i))
+
+            # Find the most square-like factorization (smallest difference)
+            best_diff = float('inf')
+            best_H, best_W = 1, spatial_points_per_timestep
+
+            for h, w in factors:
+                diff = abs(h - w)
+                if diff < best_diff:
+                    best_diff = diff
+                    best_H, best_W = h, w
+
+            H, W = best_H, best_W
+
+            if H * W * T != N:
+                raise ValueError(f"Cannot reshape tensor: H*W*T ({H}*{W}*{T}={H*W*T}) != N ({N})")
+
+            # Reshape to [T, H, W, C] - both predictions and targets should have same structure
+            pred_reshaped = predictions.cpu().view(B, T, H, W, C)  # [B, T, H, W, C]
+            target_reshaped = targets.cpu().view(B, T, H, W, C)    # [B, T, H, W, C]
             low_res_reshaped = low_res.cpu().permute(0, 2, 3, 4, 1)  # [B, T, H, W, C]
             
             results['predictions'].append(pred_reshaped[0])  # [T, H, W, C]
