@@ -36,11 +36,11 @@ def parse_args():
     parser.add_argument('--spatial_downsample', type=int, default=4, help='Spatial downsampling factor')
     parser.add_argument('--temporal_downsample', type=int, default=4, help='Temporal downsampling factor')
     
-    # Training parameters (stable defaults)
-    parser.add_argument('--batch_size', type=int, default=4, help='Batch size (stable for GPU)')
+    # Training parameters (paper defaults)
+    parser.add_argument('--batch_size', type=int, default=4, help='Batch size')
     parser.add_argument('--num_epochs', type=int, default=100, help='Number of training epochs')
-    parser.add_argument('--learning_rate', type=float, default=0.0001, help='Learning rate (stable)')
-    parser.add_argument('--lambda_pde', type=float, default=0.0001, help='PDE loss weight (stable)')
+    parser.add_argument('--learning_rate', type=float, default=0.1, help='Learning rate (paper range: 0.01-0.25)')
+    parser.add_argument('--lambda_pde', type=float, default=0.01, help='PDE loss weight (paper range: 0.001-0.1)')
 
     # Model parameters (stable for GPU)
     parser.add_argument('--feature_channels', type=int, default=256, help='Feature channels in U-Net')

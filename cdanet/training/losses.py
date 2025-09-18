@@ -67,23 +67,20 @@ class CDAnetLoss(nn.Module):
         # Regression loss
         L_reg = self.regression_loss(predictions, targets)
 
-        # Clamp regression loss to prevent explosion
-        L_reg = torch.clamp(L_reg, max=1000.0)
-
         # PDE loss (if derivatives are provided)
         if derivatives is not None:
             L_pde = self.compute_pde_loss(predictions, derivatives)
-            # Clamp PDE loss to prevent explosion
-            L_pde = torch.clamp(L_pde, max=10000.0)
         else:
             L_pde = torch.tensor(0.0, device=predictions.device)
 
         # Total loss
         total_loss = L_reg + self.lambda_pde * L_pde
 
-        # Final stability check
+        # Only check for invalid values without forcing replacement
         if torch.isnan(total_loss) or torch.isinf(total_loss):
-            total_loss = torch.tensor(1000.0, device=predictions.device)
+            print(f"Warning: Invalid loss detected - L_reg: {L_reg.item():.6f}, L_pde: {L_pde.item():.6f}")
+            # Return zero gradients instead of a fixed value
+            total_loss = torch.tensor(0.0, device=predictions.device, requires_grad=True)
 
         # Return loss components
         loss_dict = {

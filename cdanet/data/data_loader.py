@@ -52,7 +52,7 @@ class RBDataModule:
     
     def __init__(self, data_dir: str, spatial_downsample: int = 4, temporal_downsample: int = 4,
                  clip_length: int = 8, batch_size: int = 32, num_workers: int = 4,
-                 pde_points: int = 3000, normalize: bool = True):
+                 pde_points: int = 3000, normalize: bool = True):  # 3000 points as per paper
         
         self.data_dir = data_dir
         self.spatial_downsample = spatial_downsample

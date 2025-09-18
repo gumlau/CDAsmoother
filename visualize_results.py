@@ -85,13 +85,17 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
     
-    # Setup data
+    # Setup data with normalization (as per paper and training)
+    normalize_data = True  # Paper uses normalized data for training
+
+    print(f"Setting up data with normalize={normalize_data}")
     data_module = RBDataModule(
         data_dir=os.path.dirname(data_path),
         spatial_downsample=spatial_downsample,
         temporal_downsample=temporal_downsample,
         batch_size=1,
-        normalize=False  # For visualization, use raw values
+        normalize=normalize_data,
+        num_workers=0  # Avoid timeout issues
     )
     data_module.setup([Ra])
     
@@ -117,8 +121,20 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
             coords = batch['coords'].to(device)
             targets = batch['targets'].to(device)
             
-            # Get predictions
+            # Get predictions (these will be normalized)
             predictions = model(low_res, coords)
+
+            # CRITICAL: Denormalize predictions and targets for visualization
+            if data_module.normalizer is not None:
+                predictions_denorm = data_module.normalizer.denormalize(predictions.view(-1, 4)).view(predictions.shape)
+                targets_denorm = data_module.normalizer.denormalize(targets.view(-1, 4)).view(targets.shape)
+            else:
+                predictions_denorm = predictions
+                targets_denorm = targets
+
+            # Use denormalized data for visualization
+            predictions = predictions_denorm
+            targets = targets_denorm
 
             # Reshape for visualization
             B, N, C = predictions.shape
