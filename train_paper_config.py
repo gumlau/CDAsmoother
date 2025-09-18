@@ -32,7 +32,7 @@ def create_paper_config():
     config.data.batch_size = 1  # Minimal batch for initial testing
     config.data.num_workers = 0  # Disable multiprocessing for stability
     config.data.pde_points = 1000  # Reduced for initial testing
-    config.data.normalize = True  # Paper uses normalization
+    config.data.normalize = False  # Disable for initial testing
 
     # Model configuration (paper architecture)
     config.model.in_channels = 4
@@ -121,7 +121,14 @@ def main():
         normalize=config.data.normalize
     )
 
-    data_module.setup(config.data.Ra_numbers)
+    try:
+        data_module.setup(config.data.Ra_numbers)
+        print("✅ Data module setup successful")
+    except Exception as e:
+        print(f"❌ Data module setup failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
 
     # Print data info
     data_info = data_module.get_dataset_info()

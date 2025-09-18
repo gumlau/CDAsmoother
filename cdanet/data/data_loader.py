@@ -79,29 +79,46 @@ class RBDataModule:
         for Ra in Ra_numbers:
             # Find data file for this Ra number
             data_file = self._find_data_file(Ra)
-            
+
             if data_file is None:
-                print(f"Warning: No data file found for Ra = {Ra}")
+                print(f"Error: No data file found for Ra = {Ra}")
+                print(f"  Checked directory: {self.data_dir}")
+                print(f"  Looking for: rb_data_Ra_{Ra:.0e}.h5")
+                import os
+                if os.path.exists(self.data_dir):
+                    files = [f for f in os.listdir(self.data_dir) if f.endswith('.h5')]
+                    print(f"  Available files: {files[:5]}...")  # Show first 5 files
                 continue
-                
+
+            import os
             print(f"Loading data for Ra = {Ra} from {data_file}")
+            print(f"File exists: {os.path.exists(data_file)}")
+            print(f"File size: {os.path.getsize(data_file) / 1024 / 1024:.1f} MB")
             
             # Create transforms
             transforms = [RandomCoordinateSampler(self.pde_points)]
             
             # Setup datasets for train/val/test
             for split in ['train', 'val', 'test']:
-                dataset = RBDataset(
-                    data_path=data_file,
-                    spatial_downsample=self.spatial_downsample,
-                    temporal_downsample=self.temporal_downsample,
-                    clip_length=self.clip_length,
-                    split=split,
-                    transform=self._compose_transforms(transforms.copy())
-                )
-                
-                key = f"Ra_{Ra:.0e}_{split}"
-                self.datasets[key] = dataset
+                try:
+                    dataset = RBDataset(
+                        data_path=data_file,
+                        spatial_downsample=self.spatial_downsample,
+                        temporal_downsample=self.temporal_downsample,
+                        clip_length=self.clip_length,
+                        split=split,
+                        transform=self._compose_transforms(transforms.copy())
+                    )
+
+                    key = f"Ra_{Ra:.0e}_{split}"
+                    self.datasets[key] = dataset
+                    print(f"  Created dataset {key}: {len(dataset)} samples")
+
+                except Exception as e:
+                    print(f"  Error creating dataset for {split}: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    continue
                 
             # Setup normalizer using training data
             if self.normalize and f"Ra_{Ra:.0e}_train" in self.datasets:
