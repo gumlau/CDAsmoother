@@ -128,31 +128,40 @@ class RBDataModule:
         
     def _find_data_file(self, Ra: float) -> Optional[str]:
         """Find HDF5 data file(s) for given Rayleigh number."""
+        import os
+        import glob
+
+        print(f"  Searching for Ra={Ra} in directory: {self.data_dir}")
+
         # First try single files
         possible_names = [
             f"rb_data_Ra_{Ra:.0e}.h5",
             f"rb_data_Ra_{int(Ra)}.h5",
-            f"rb_data_{Ra:.0e}.h5", 
+            f"rb_data_{Ra:.0e}.h5",
             f"rb_data_{int(Ra)}.h5",
             f"Ra_{Ra:.0e}.h5",
             f"Ra_{int(Ra)}.h5",
             "rb_simulation_data.h5"  # Default name
         ]
-        
+
         for name in possible_names:
             filepath = os.path.join(self.data_dir, name)
+            print(f"    Checking: {filepath} -> {os.path.exists(filepath)}")
             if os.path.exists(filepath):
+                print(f"    Found: {filepath}")
                 return filepath
-        
+
         # Look for multiple run files pattern
-        import glob
         pattern = os.path.join(self.data_dir, f"rb_data_Ra_{Ra:.0e}_run_*.h5")
         run_files = glob.glob(pattern)
-        
+        print(f"    Checking run files pattern: {pattern} -> found {len(run_files)} files")
+
         if run_files:
             # Return first file found - dataset will handle multiple runs
+            print(f"    Using first run file: {run_files[0]}")
             return run_files[0]
-                
+
+        print(f"    No data files found for Ra={Ra}")
         # If no files found, return None
         return None
         

@@ -24,7 +24,7 @@ def create_paper_config():
     config.description = "CDAnet training with exact paper configuration"
 
     # Data configuration (paper settings)
-    config.data.data_dir = './rb_data_numerical'
+    config.data.data_dir = os.path.abspath('./rb_data_numerical')
     config.data.spatial_downsample = 4
     config.data.temporal_downsample = 4
     config.data.clip_length = 8
@@ -99,6 +99,9 @@ def main():
 
     # Check if consolidated data file exists
     data_file = os.path.join(config.data.data_dir, 'rb_data_Ra_1e+05.h5')
+    print(f"Looking for consolidated file: {data_file}")
+    print(f"Working directory: {os.getcwd()}")
+    print(f"Data directory exists: {os.path.exists(config.data.data_dir)}")
     if not os.path.exists(data_file):
         print(f"Consolidated data file not found at {data_file}")
         print("Converting run files to consolidated format...")
@@ -124,6 +127,14 @@ def main():
     try:
         data_module.setup(config.data.Ra_numbers)
         print("✅ Data module setup successful")
+
+        # Verify data loaders were created
+        available_loaders = list(data_module.data_loaders.keys())
+        print(f"Available data loaders: {available_loaders}")
+
+        if not available_loaders:
+            raise RuntimeError("No data loaders were created!")
+
     except Exception as e:
         print(f"❌ Data module setup failed: {e}")
         import traceback
