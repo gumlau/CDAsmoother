@@ -29,9 +29,9 @@ def create_paper_config():
     config.data.temporal_downsample = 4
     config.data.clip_length = 8
     config.data.Ra_numbers = [1e5]  # Start with Ra=10^5 as in paper
-    config.data.batch_size = 4  # Small batch for stability
-    config.data.num_workers = 4
-    config.data.pde_points = 3000  # Exact paper setting
+    config.data.batch_size = 1  # Minimal batch for initial testing
+    config.data.num_workers = 0  # Disable multiprocessing for stability
+    config.data.pde_points = 1000  # Reduced for initial testing
     config.data.normalize = True  # Paper uses normalization
 
     # Model configuration (paper architecture)
@@ -53,7 +53,7 @@ def create_paper_config():
 
     # Optimizer configuration (paper settings)
     config.optimizer.optimizer_type = 'adam'  # Adam is more stable than SGD
-    config.optimizer.learning_rate = 0.1  # Paper range: 0.01-0.25
+    config.optimizer.learning_rate = 0.001  # Conservative for initial testing
     config.optimizer.weight_decay = 1e-4
     config.optimizer.scheduler_type = 'plateau'
     config.optimizer.patience = 10
@@ -61,7 +61,7 @@ def create_paper_config():
     config.optimizer.min_lr = 1e-6
 
     # Training configuration
-    config.training.num_epochs = 50  # Start with fewer epochs for testing
+    config.training.num_epochs = 5  # Minimal epochs for initial testing
     config.training.clips_per_epoch = None  # Use all clips
     config.training.val_interval = 5
     config.training.checkpoint_interval = 10
@@ -96,6 +96,20 @@ def main():
 
     # Setup data
     print("Setting up data...")
+
+    # Check if consolidated data file exists
+    data_file = os.path.join(config.data.data_dir, 'rb_data_Ra_1e+05.h5')
+    if not os.path.exists(data_file):
+        print(f"Consolidated data file not found at {data_file}")
+        print("Converting run files to consolidated format...")
+        import subprocess
+        result = subprocess.run(['python3', 'convert_rb_data.py'],
+                              capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"Data conversion failed: {result.stderr}")
+            raise RuntimeError("Could not create consolidated data file")
+        print("Data conversion completed successfully")
+
     data_module = RBDataModule(
         data_dir=config.data.data_dir,
         spatial_downsample=config.data.spatial_downsample,
@@ -106,6 +120,7 @@ def main():
         pde_points=config.data.pde_points,
         normalize=config.data.normalize
     )
+
     data_module.setup(config.data.Ra_numbers)
 
     # Print data info
