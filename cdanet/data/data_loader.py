@@ -161,6 +161,21 @@ class RBDataModule:
             print(f"    Using first run file: {run_files[0]}")
             return run_files[0]
 
+        # Check if directory exists and list all files for debugging
+        if os.path.exists(self.data_dir):
+            all_files = os.listdir(self.data_dir)
+            h5_files = [f for f in all_files if f.endswith('.h5')]
+            print(f"    Available .h5 files in directory: {h5_files}")
+
+            # Try to find any file with the Ra number in the name
+            for filename in h5_files:
+                if f"{Ra:.0e}" in filename or f"{int(Ra)}" in filename:
+                    filepath = os.path.join(self.data_dir, filename)
+                    print(f"    Found matching file by Ra number: {filepath}")
+                    return filepath
+        else:
+            print(f"    Data directory does not exist: {self.data_dir}")
+
         print(f"    No data files found for Ra={Ra}")
         # If no files found, return None
         return None

@@ -102,8 +102,15 @@ def main():
     print(f"Looking for consolidated file: {data_file}")
     print(f"Working directory: {os.getcwd()}")
     print(f"Data directory exists: {os.path.exists(config.data.data_dir)}")
+
     if not os.path.exists(data_file):
         print(f"Consolidated data file not found at {data_file}")
+
+        # List available files before conversion
+        if os.path.exists(config.data.data_dir):
+            files = [f for f in os.listdir(config.data.data_dir) if f.endswith('.h5')]
+            print(f"Available .h5 files before conversion: {files[:10]}...")  # Show first 10
+
         print("Converting run files to consolidated format...")
         import subprocess
         result = subprocess.run(['python3', 'convert_rb_data.py'],
@@ -112,6 +119,20 @@ def main():
             print(f"Data conversion failed: {result.stderr}")
             raise RuntimeError("Could not create consolidated data file")
         print("Data conversion completed successfully")
+
+        # Check if file exists after conversion
+        if os.path.exists(data_file):
+            print(f"✅ Consolidated file created: {data_file}")
+            print(f"File size: {os.path.getsize(data_file) / 1024 / 1024:.1f} MB")
+        else:
+            print(f"❌ Consolidated file still not found after conversion")
+            # List files again to see what was created
+            if os.path.exists(config.data.data_dir):
+                files = [f for f in os.listdir(config.data.data_dir) if f.endswith('.h5')]
+                print(f"Available .h5 files after conversion: {files[:10]}...")
+    else:
+        print(f"✅ Consolidated file already exists: {data_file}")
+        print(f"File size: {os.path.getsize(data_file) / 1024 / 1024:.1f} MB")
 
     data_module = RBDataModule(
         data_dir=config.data.data_dir,
