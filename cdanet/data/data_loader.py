@@ -255,63 +255,69 @@ class RBDataModule:
             }
         return info
         
-    def create_synthetic_data(self, output_path: str, Ra: float = 1e5, 
+    def create_synthetic_data(self, output_path: str, Ra: float = 1e5,
                             nx: int = 768, ny: int = 256, nt: int = 600):
         """
-        Create synthetic Rayleigh-Bénard data using the original simulation.
+        Create synthetic Rayleigh-Bénard data using the rb_simulation functions.
         This is a convenience method to generate training data.
         """
         print(f"Generating synthetic RB data: Ra={Ra}, grid={nx}x{ny}, timesteps={nt}")
-        
-        # Import the original simulation
+
+        # Import the simulation functions
         import sys
-        sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        from rb_simulation import RBNumericalSimulation
-        
-        # Create simulation
-        sim = RBNumericalSimulation(
-            nx=nx, ny=ny, Ra=Ra, dt=5e-4,
-            save_path=os.path.dirname(output_path)
-        )
-        
-        # Run simulation and collect data
+        sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        from rb_simulation import generate_rb_snapshot
+
+        # Parameters
+        dt = 5e-4
+        Pr = 0.7
+        Lx, Ly = 3.0, 1.0
+
+        # Collect data at regular intervals
         data_snapshots = []
         times = []
-        
+
         print("Running simulation...")
-        for step in range(nt):
+        for step in range(0, nt, 10):  # Sample every 10 steps
             if step % 100 == 0:
                 print(f"Step {step}/{nt}")
-                
-            sim.step(step)
-            
-            # Collect data every few steps
-            if step % 10 == 0:  # Collect every 10 steps
-                # Stack fields: [T, p, u, v] -> [H, W, 4]
-                snapshot = np.stack([
-                    sim.T, sim.p, sim.u, sim.v
-                ], axis=-1)
+
+            # Generate snapshot using rb_simulation function
+            T, u, v, p = generate_rb_snapshot(nx, ny, Ra, step, dt)
+
+            # Stack fields: [T, p, u, v] -> [ny, nx, 4]
+            snapshot = np.stack([T, p, u, v], axis=-1)
+
+            # Ensure correct format: [ny, nx, 4]
+            if len(snapshot.shape) == 3 and snapshot.shape[2] == 4:
                 data_snapshots.append(snapshot)
-                times.append(step * sim.dt)
-                
+                times.append(step * dt)
+            else:
+                print(f"Warning: Unexpected snapshot shape: {snapshot.shape}")
+
         # Convert to array: [T, H, W, 4]
         data_array = np.array(data_snapshots)
         times_array = np.array(times)
-        
+
         print(f"Generated data shape: {data_array.shape}")
-        
-        # Save to HDF5
+
+        # Save to HDF5 format compatible with dataset
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         with h5py.File(output_path, 'w') as f:
-            f.create_dataset('data', data=data_array)
+            # Save in optimized format
+            f.create_dataset('data', data=data_array, compression='gzip', compression_opts=4)
             f.create_dataset('times', data=times_array)
+
+            # Metadata
             f.attrs['Ra'] = Ra
-            f.attrs['Pr'] = sim.Pr
-            f.attrs['dt'] = sim.dt
+            f.attrs['Pr'] = Pr
+            f.attrs['dt'] = dt
             f.attrs['nx'] = nx
             f.attrs['ny'] = ny
-            f.attrs['Lx'] = sim.Lx
-            f.attrs['Ly'] = sim.Ly
-            
+            f.attrs['Lx'] = Lx
+            f.attrs['Ly'] = Ly
+            f.attrs['n_samples'] = len(data_snapshots)
+
         print(f"Saved synthetic data to {output_path}")
+        print(f"File size: {os.path.getsize(output_path) / 1024 / 1024:.1f} MB")
         return output_path

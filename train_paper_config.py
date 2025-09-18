@@ -110,26 +110,81 @@ def main():
         if os.path.exists(config.data.data_dir):
             files = [f for f in os.listdir(config.data.data_dir) if f.endswith('.h5')]
             print(f"Available .h5 files before conversion: {files[:10]}...")  # Show first 10
+        else:
+            print(f"Creating data directory: {config.data.data_dir}")
+            os.makedirs(config.data.data_dir, exist_ok=True)
+            files = []
 
-        print("Converting run files to consolidated format...")
-        import subprocess
-        result = subprocess.run(['python3', 'convert_rb_data.py'],
-                              capture_output=True, text=True)
-        if result.returncode != 0:
-            print(f"Data conversion failed: {result.stderr}")
-            raise RuntimeError("Could not create consolidated data file")
-        print("Data conversion completed successfully")
+        # If no .h5 files exist, generate sample data first
+        if not files:
+            print("No data files found. Generating sample RB simulation data...")
 
-        # Check if file exists after conversion
+            # Generate sample data using data module
+            try:
+                temp_data_module = RBDataModule(
+                    data_dir=config.data.data_dir,
+                    spatial_downsample=config.data.spatial_downsample,
+                    temporal_downsample=config.data.temporal_downsample,
+                    clip_length=config.data.clip_length,
+                    batch_size=config.data.batch_size,
+                    num_workers=0,
+                    pde_points=config.data.pde_points,
+                    normalize=config.data.normalize
+                )
+
+                # Use create_synthetic_data method
+                synthetic_file = temp_data_module.create_synthetic_data(
+                    output_path=data_file,
+                    Ra=1e5,
+                    nx=256,  # Smaller for faster generation
+                    ny=64,   # Smaller for faster generation
+                    nt=800   # Enough timesteps for clips (need > clip_length * temporal_downsample)
+                )
+
+                print(f"✅ Generated synthetic data: {synthetic_file}")
+
+            except Exception as e:
+                print(f"❌ Failed to generate synthetic data: {e}")
+                print("Trying alternative RB simulation...")
+
+                # Fallback: run rb_simulation.py
+                import subprocess
+                result = subprocess.run(['python3', 'rb_simulation.py', '--Ra', '1e5', '--n_runs', '3'],
+                                      capture_output=True, text=True)
+                if result.returncode != 0:
+                    print(f"❌ RB simulation failed: {result.stderr}")
+                    raise RuntimeError("Could not generate training data")
+
+                print("✅ RB simulation completed")
+
+        # Now try conversion if we have run files
+        if os.path.exists(config.data.data_dir):
+            files = [f for f in os.listdir(config.data.data_dir) if f.endswith('.h5')]
+
+        if files and not os.path.exists(data_file):
+            print("Converting run files to consolidated format...")
+            import subprocess
+            result = subprocess.run(['python3', 'convert_rb_data.py'],
+                                  capture_output=True, text=True)
+            if result.returncode != 0:
+                print(f"Data conversion failed: {result.stderr}")
+                print("Proceeding with existing files...")
+
+        # Final check for data file
         if os.path.exists(data_file):
-            print(f"✅ Consolidated file created: {data_file}")
+            print(f"✅ Consolidated file ready: {data_file}")
             print(f"File size: {os.path.getsize(data_file) / 1024 / 1024:.1f} MB")
         else:
-            print(f"❌ Consolidated file still not found after conversion")
-            # List files again to see what was created
+            # List what files we actually have
             if os.path.exists(config.data.data_dir):
                 files = [f for f in os.listdir(config.data.data_dir) if f.endswith('.h5')]
-                print(f"Available .h5 files after conversion: {files[:10]}...")
+                print(f"Available .h5 files: {files}")
+                if files:
+                    print("✅ Will proceed with available data files")
+                else:
+                    raise RuntimeError("No data files available for training")
+            else:
+                raise RuntimeError("Data directory does not exist")
     else:
         print(f"✅ Consolidated file already exists: {data_file}")
         print(f"File size: {os.path.getsize(data_file) / 1024 / 1024:.1f} MB")
