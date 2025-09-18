@@ -126,13 +126,17 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
 
             # CRITICAL: Denormalize predictions and targets for visualization
             if data_module.normalizer is not None:
-                predictions_denorm = data_module.normalizer.denormalize(predictions.view(-1, 4)).view(predictions.shape)
-                targets_denorm = data_module.normalizer.denormalize(targets.view(-1, 4)).view(targets.shape)
-            else:
-                predictions_denorm = predictions
-                targets_denorm = targets
+                # Move data to CPU before denormalization to match normalizer device
+                predictions_cpu = predictions.cpu()
+                targets_cpu = targets.cpu()
 
-            # Use denormalized data for visualization
+                predictions_denorm = data_module.normalizer.denormalize(predictions_cpu.view(-1, 4)).view(predictions_cpu.shape)
+                targets_denorm = data_module.normalizer.denormalize(targets_cpu.view(-1, 4)).view(targets_cpu.shape)
+            else:
+                predictions_denorm = predictions.cpu()
+                targets_denorm = targets.cpu()
+
+            # Use denormalized data for visualization (on CPU)
             predictions = predictions_denorm
             targets = targets_denorm
 
@@ -172,8 +176,8 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
                 raise ValueError(f"Cannot reshape tensor: H*W*T ({H}*{W}*{T}={H*W*T}) != N ({N})")
 
             # Reshape to [T, H, W, C] - both predictions and targets should have same structure
-            pred_reshaped = predictions.cpu().view(B, T, H, W, C)  # [B, T, H, W, C]
-            target_reshaped = targets.cpu().view(B, T, H, W, C)    # [B, T, H, W, C]
+            pred_reshaped = predictions.view(B, T, H, W, C)  # [B, T, H, W, C]
+            target_reshaped = targets.view(B, T, H, W, C)    # [B, T, H, W, C]
             low_res_reshaped = low_res.cpu().permute(0, 2, 3, 4, 1)  # [B, T, H, W, C]
             
             results['predictions'].append(pred_reshaped[0])  # [T, H, W, C]
