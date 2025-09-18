@@ -101,10 +101,13 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
     
     # Get test data
     test_loader = data_module.get_dataloader(Ra, 'test')
-    
+
+    print(f"🔍 Debug Info:")
+    print(f"  Test loader batches: {len(test_loader)}")
+
     results = {
         'input_fields': [],
-        'truth_fields': [], 
+        'truth_fields': [],
         'predictions': []
     }
     
@@ -113,16 +116,30 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
     
     with torch.no_grad():
         for i, batch in enumerate(test_loader):
+            print(f"🔍 Processing batch {i+1}/{len(test_loader)}")
+
             if i >= 10:  # Limit to first 10 batches for visualization
                 break
-                
+
             # Move to device
             low_res = batch['low_res'].to(device)
             coords = batch['coords'].to(device)
             targets = batch['targets'].to(device)
-            
+
+            # Debug data shapes and ranges
+            print(f"  📊 Data shapes:")
+            print(f"    Low-res input: {low_res.shape}")
+            print(f"    Targets: {targets.shape}")
+            print(f"    Coords: {coords.shape}")
+
+            # Debug data value ranges
+            print(f"  📈 Value ranges:")
+            print(f"    Low-res T range: [{low_res[0,0,:,:,0].min().item():.3f}, {low_res[0,0,:,:,0].max().item():.3f}]")
+            print(f"    Target T range: [{targets[0,:,0].min().item():.3f}, {targets[0,:,0].max().item():.3f}]")
+
             # Get predictions (these will be normalized)
             predictions = model(low_res, coords)
+            print(f"    Prediction T range: [{predictions[0,:,0].min().item():.3f}, {predictions[0,:,0].max().item():.3f}]")
 
             # CRITICAL: Denormalize predictions and targets for visualization
             if data_module.normalizer is not None:
@@ -154,11 +171,18 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
             # Calculate spatial points per timestep
             spatial_points_per_timestep = N // T
 
+            print(f"  📐 Reshaping analysis:")
+            print(f"    Total points N: {N}")
+            print(f"    Clip length T: {T}")
+            print(f"    Spatial points per timestep: {spatial_points_per_timestep}")
+
             # Find the factorization H x W = spatial_points_per_timestep
             factors = []
             for i in range(1, int(spatial_points_per_timestep**0.5) + 1):
                 if spatial_points_per_timestep % i == 0:
                     factors.append((i, spatial_points_per_timestep // i))
+
+            print(f"    Possible H×W factorizations: {factors}")
 
             # Find the most square-like factorization (smallest difference)
             best_diff = float('inf')
@@ -171,6 +195,7 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
                     best_H, best_W = h, w
 
             H, W = best_H, best_W
+            print(f"    Selected reshape: {H}×{W}×{T} = {H*W*T}")
 
             if H * W * T != N:
                 raise ValueError(f"Cannot reshape tensor: H*W*T ({H}*{W}*{T}={H*W*T}) != N ({N})")
