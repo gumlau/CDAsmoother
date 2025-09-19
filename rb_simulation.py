@@ -19,8 +19,15 @@ def generate_rb_snapshot(nx, ny, Ra, time_step, dt=5e-4):
     y = np.linspace(0, Ly, ny)
     X, Y = np.meshgrid(x, y)
 
-    # Base linear temperature profile (hot bottom, cold top)
-    T = 1.0 - Y / Ly
+    # Base temperature profile with 2D variations (not purely linear!)
+    T_base = 1.0 - Y / Ly  # Basic linear gradient
+
+    # Add significant 2D base temperature structure
+    T_2d_variation = 0.1 * np.sin(2 * np.pi * X / Lx) * np.sin(np.pi * Y / Ly)
+    T_2d_variation += 0.05 * np.sin(4 * np.pi * X / Lx) * np.sin(2 * np.pi * Y / Ly)
+
+    # Base temperature with inherent 2D structure
+    T = T_base + T_2d_variation
 
     # Time-dependent parameters
     time = time_step * dt
@@ -47,51 +54,86 @@ def generate_rb_snapshot(nx, ny, Ra, time_step, dt=5e-4):
     for i in range(n_large):
         x_center = (i + 0.5) * Lx / n_large
         kx_large = 2 * np.pi * n_large / Lx
-        ky_large = np.pi / Ly
 
-        # Phase evolution with slight randomness
-        phase_large = time * 0.5 + i * np.pi / n_large + 0.1 * np.sin(time * 0.3 + i)
+        # Multiple Y-direction modes to avoid horizontal stripes
+        for j in range(2):  # Add Y-direction complexity
+            ky_large = np.pi * (j + 1) / Ly  # π/Ly, 2π/Ly
 
-        # Stream function for circulation
-        psi_large = amp_large * np.sin(kx_large * (X - x_center)) * np.sin(ky_large * Y) * np.cos(phase_large)
+            # Phase evolution with slight randomness
+            phase_large = time * 0.5 + i * np.pi / n_large + j * np.pi / 2 + 0.1 * np.sin(time * 0.3 + i + j)
 
-        # Velocities from stream function (u = -∂ψ/∂y, v = ∂ψ/∂x)
-        u += amp_large * kx_large * np.cos(kx_large * (X - x_center)) * np.sin(ky_large * Y) * np.cos(phase_large)
-        v += -amp_large * ky_large * np.sin(kx_large * (X - x_center)) * np.cos(ky_large * Y) * np.cos(phase_large)
+            # Amplitude varies with Y-mode
+            amp_y = amp_large * (1.0 - 0.3 * j)  # Reduce amplitude for higher modes
 
-        # Temperature perturbation follows velocity pattern
-        T_pert += amp_large * 0.5 * np.sin(kx_large * (X - x_center)) * np.sin(ky_large * Y) * np.cos(phase_large + np.pi/4)
+            # Stream function for circulation
+            psi_large = amp_y * np.sin(kx_large * (X - x_center)) * np.sin(ky_large * Y) * np.cos(phase_large)
+
+            # Velocities from stream function (u = -∂ψ/∂y, v = ∂ψ/∂x)
+            u += amp_y * kx_large * np.cos(kx_large * (X - x_center)) * np.sin(ky_large * Y) * np.cos(phase_large)
+            v += -amp_y * ky_large * np.sin(kx_large * (X - x_center)) * np.cos(ky_large * Y) * np.cos(phase_large)
+
+            # Temperature perturbation follows velocity pattern
+            T_pert += amp_y * 0.5 * np.sin(kx_large * (X - x_center)) * np.sin(ky_large * Y) * np.cos(phase_large + np.pi/4)
 
     # Medium-scale convection (secondary circulation)
     for i in range(n_medium):
         kx_med = 2 * np.pi * n_medium / Lx
-        ky_med = 2 * np.pi / Ly
-        phase_med = time * 0.8 + i * np.pi / n_medium + 0.2 * np.sin(time * 0.7 + i)
 
-        u += amp_medium * np.cos(kx_med * X + phase_med) * np.sin(ky_med * Y)
-        v += amp_medium * np.sin(kx_med * X + phase_med) * np.cos(ky_med * Y) * 0.5
-        T_pert += amp_medium * 0.3 * np.sin(kx_med * X + phase_med) * np.sin(ky_med * Y)
+        # Add multiple Y-direction modes for medium scale
+        for j in range(2):
+            ky_med = np.pi * (j + 2) / Ly  # 2π/Ly, 3π/Ly
+            phase_med = time * 0.8 + i * np.pi / n_medium + j * np.pi / 3 + 0.2 * np.sin(time * 0.7 + i + j)
 
-    # Small-scale turbulent fluctuations
+            # Reduce amplitude for higher modes
+            amp_med_y = amp_medium * (1.0 - 0.2 * j)
+
+            u += amp_med_y * np.cos(kx_med * X + phase_med) * np.sin(ky_med * Y)
+            v += amp_med_y * np.sin(kx_med * X + phase_med) * np.cos(ky_med * Y) * 0.5
+            T_pert += amp_med_y * 0.3 * np.sin(kx_med * X + phase_med) * np.sin(ky_med * Y)
+
+    # Small-scale turbulent fluctuations - make more 2D
     for i in range(n_small):
-        kx_small = 2 * np.pi * n_small / Lx + np.random.normal(0, 0.1)
-        ky_small = 2 * np.pi * i / Ly + np.random.normal(0, 0.1)
+        # Random wave numbers in both directions
+        kx_small = 2 * np.pi * (n_small + np.random.normal(0, 1)) / Lx
+        ky_small = 2 * np.pi * (1 + i//2 + np.random.normal(0, 0.5)) / Ly  # More Y variation
         phase_small = time * (1.5 + 0.5 * i) + np.random.normal(0, 0.2)
 
-        u += amp_small * np.cos(kx_small * X + phase_small) * np.sin(ky_small * Y)
-        v += amp_small * np.sin(kx_small * X + phase_small) * np.cos(ky_small * Y)
-        T_pert += amp_small * 0.2 * np.sin(kx_small * X + phase_small) * np.sin(ky_small * Y)
+        # Make sure Y-direction has significant variation
+        amp_small_effective = amp_small * (1.0 + 0.5 * np.random.normal())
+
+        u += amp_small_effective * np.cos(kx_small * X + phase_small) * np.sin(ky_small * Y)
+        v += amp_small_effective * np.sin(kx_small * X + phase_small) * np.cos(ky_small * Y)
+        T_pert += amp_small_effective * 0.2 * np.sin(kx_small * X + phase_small) * np.sin(ky_small * Y)
 
     # Add temperature perturbation to base profile
     T += T_pert
+
+    # CRITICAL: Add strong Y-direction variation to break stripes
+    # Create Y-direction thermal plumes and variations
+    for plume in range(4):  # Multiple thermal plumes
+        y_center = (plume + 0.5) * Ly / 4
+        y_width = 0.1
+
+        # Plume strength varies with time and position
+        plume_phase = time * 0.4 + plume * np.pi / 2
+        plume_strength = 0.15 * np.cos(plume_phase)
+
+        # Gaussian plume in Y direction
+        y_profile = np.exp(-((Y - y_center) / y_width)**2)
+
+        # Modulate across X with some randomness
+        x_modulation = 1.0 + 0.3 * np.sin(2 * np.pi * X / Lx + plume * np.pi / 4)
+
+        T += plume_strength * y_profile * x_modulation
 
     # Add boundary layer effects near walls
     boundary_layer = 0.05  # thickness
     y_boundary_bottom = np.exp(-Y / boundary_layer)
     y_boundary_top = np.exp(-(Ly - Y) / boundary_layer)
 
-    # Enhanced temperature gradient near boundaries
-    T += 0.1 * y_boundary_bottom - 0.1 * y_boundary_top
+    # Enhanced temperature gradient near boundaries with X variation
+    boundary_variation = 1.0 + 0.2 * np.sin(4 * np.pi * X / Lx + time)
+    T += 0.1 * y_boundary_bottom * boundary_variation - 0.1 * y_boundary_top * boundary_variation
 
     # Apply proper boundary conditions
     # Temperature: hot bottom (T=1), cold top (T=0)
