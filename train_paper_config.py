@@ -29,10 +29,10 @@ def create_paper_config():
     config.data.temporal_downsample = 4
     config.data.clip_length = 8
     config.data.Ra_numbers = [1e5]  # Start with Ra=10^5 as in paper
-    config.data.batch_size = 1  # Minimal batch for initial testing
-    config.data.num_workers = 0  # Disable multiprocessing for stability
-    config.data.pde_points = 1000  # Reduced for initial testing
-    config.data.normalize = False  # Disable for initial testing
+    config.data.batch_size = 8  # Increase batch size for better training
+    config.data.num_workers = 4  # Enable multiprocessing for faster loading
+    config.data.pde_points = 3000  # Paper uses 3,000 points
+    config.data.normalize = True  # Enable normalization as typically used
 
     # Model configuration (paper architecture)
     config.model.in_channels = 4
@@ -53,23 +53,23 @@ def create_paper_config():
 
     # Optimizer configuration (paper settings)
     config.optimizer.optimizer_type = 'adam'  # Adam is more stable than SGD
-    config.optimizer.learning_rate = 0.001  # Conservative for initial testing
+    config.optimizer.learning_rate = 0.1  # Paper range: 0.01-0.25, start with 0.1
     config.optimizer.weight_decay = 1e-4
     config.optimizer.scheduler_type = 'plateau'
-    config.optimizer.patience = 10
-    config.optimizer.factor = 0.5
+    config.optimizer.patience = 10  # Paper: reduce LR if no improvement in 10 epochs
+    config.optimizer.factor = 0.1  # Paper: scale LR by 0.1
     config.optimizer.min_lr = 1e-6
 
-    # Training configuration
-    config.training.num_epochs = 5  # Minimal epochs for initial testing
-    config.training.clips_per_epoch = None  # Use all clips
+    # Training configuration (paper settings)
+    config.training.num_epochs = 100  # Paper: 100 epochs
+    config.training.clips_per_epoch = 3000  # Paper: 3,000 clips per epoch
     config.training.val_interval = 5
     config.training.checkpoint_interval = 10
     config.training.save_best = True
     config.training.early_stopping = True
     config.training.patience = 20
     config.training.min_delta = 1e-6
-    config.training.use_amp = False  # Disable AMP for stability
+    config.training.use_amp = True  # Enable AMP for faster training
     config.training.device = 'cuda' if torch.cuda.is_available() else 'cpu'
     config.training.log_interval = 10
     config.training.output_dir = './outputs'
