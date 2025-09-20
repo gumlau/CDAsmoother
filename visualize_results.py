@@ -164,45 +164,59 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
             # Make sure predictions and targets have the same N
             assert N == target_N, f"Prediction N ({N}) != target N ({target_N})"
 
-            # The key insight: N represents the total number of high-resolution points
-            # We need to figure out the spatial-temporal structure from this
-            T = 8  # clip length (this should match the data)
+            # FIXED: Use correct spatial dimensions based on the original RB data
+            # Original RB data: (time_steps, 170, 512, 4)
+            # With spatial_downsample=4: low-res becomes (time_steps, 43, 128, 4)
+            # With temporal_downsample=4: clip becomes 8 timesteps
 
-            # Calculate spatial points per timestep
-            spatial_points_per_timestep = N // T
+            # Get low-res dimensions to determine high-res structure
+            B_lr, C_lr, T_lr, H_lr, W_lr = low_res.shape
+            print(f"  📐 Low-res input shape: {low_res.shape}")
 
-            print(f"  📐 Reshaping analysis:")
-            print(f"    Total points N: {N}")
-            print(f"    Clip length T: {T}")
-            print(f"    Spatial points per timestep: {spatial_points_per_timestep}")
+            # Use the known original data structure: H=170, W=512
+            # High-res dimensions after upsampling
+            H_hr = H_lr * spatial_downsample  # Should be close to 170
+            W_hr = W_lr * spatial_downsample  # Should be close to 512
+            T_hr = T_lr * temporal_downsample  # Should be 8 for clip length
 
-            # Find the factorization H x W = spatial_points_per_timestep
-            factors = []
-            for i in range(1, int(spatial_points_per_timestep**0.5) + 1):
-                if spatial_points_per_timestep % i == 0:
-                    factors.append((i, spatial_points_per_timestep // i))
+            print(f"  📐 Calculated high-res dimensions:")
+            print(f"    Time steps (T): {T_hr}")
+            print(f"    Height (H): {H_hr}")
+            print(f"    Width (W): {W_hr}")
+            print(f"    Expected total points: {T_hr * H_hr * W_hr}")
+            print(f"    Actual total points N: {N}")
 
-            print(f"    Possible H×W factorizations: {factors}")
+            # Handle dimension mismatch by using the correct original data structure
+            if T_hr * H_hr * W_hr != N:
+                print(f"  ⚠️  Using original data dimensions...")
 
-            # Find the most square-like factorization (smallest difference)
-            best_diff = float('inf')
-            best_H, best_W = 1, spatial_points_per_timestep
+                # Use the actual original RB data dimensions
+                # The model was trained on data with these exact dimensions
+                T_hr = 8  # Standard clip length
+                H_hr = 170  # Original height from RB data
+                W_hr = 512  # Original width from RB data
 
-            for h, w in factors:
-                diff = abs(h - w)
-                if diff < best_diff:
-                    best_diff = diff
-                    best_H, best_W = h, w
+                # Check if this matches
+                if T_hr * H_hr * W_hr == N:
+                    print(f"    ✅ Perfect match: T={T_hr}, H={H_hr}, W={W_hr}")
+                else:
+                    # Try with downsampled versions
+                    for ds in [1, 2, 4, 8]:
+                        test_H = 170 // ds
+                        test_W = 512 // ds
+                        if T_hr * test_H * test_W == N:
+                            H_hr, W_hr = test_H, test_W
+                            print(f"    ✅ Found match with downsample {ds}: T={T_hr}, H={H_hr}, W={W_hr}")
+                            break
+                    else:
+                        # Last resort: use calculated dimensions but warn
+                        print(f"    ⚠️  No exact match found. Using calculated dimensions.")
 
-            H, W = best_H, best_W
-            print(f"    Selected reshape: {H}×{W}×{T} = {H*W*T}")
-
-            if H * W * T != N:
-                raise ValueError(f"Cannot reshape tensor: H*W*T ({H}*{W}*{T}={H*W*T}) != N ({N})")
+            print(f"  📐 Final dimensions: T={T_hr}, H={H_hr}, W={W_hr}")
 
             # Reshape to [T, H, W, C] - both predictions and targets should have same structure
-            pred_reshaped = predictions.view(B, T, H, W, C)  # [B, T, H, W, C]
-            target_reshaped = targets.view(B, T, H, W, C)    # [B, T, H, W, C]
+            pred_reshaped = predictions.view(B, T_hr, H_hr, W_hr, C)  # [B, T, H, W, C]
+            target_reshaped = targets.view(B, T_hr, H_hr, W_hr, C)    # [B, T, H, W, C]
             low_res_reshaped = low_res.cpu().permute(0, 2, 3, 4, 1)  # [B, T, H, W, C]
             
             results['predictions'].append(pred_reshaped[0])  # [T, H, W, C]
