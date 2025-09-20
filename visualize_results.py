@@ -65,11 +65,13 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
     
     # Load checkpoint
     checkpoint = torch.load(checkpoint_path, map_location='cpu')
-    
+    print(f"🔍 Checkpoint keys: {list(checkpoint.keys())}")
+
     # Create model
     if 'config' in checkpoint:
         config_dict = checkpoint['config']
         model_config = config_dict['model']
+        print(f"🔍 Using config from checkpoint: {model_config}")
     else:
         # Default config matching working_example_checkpoint.pth
         model_config = {
@@ -80,10 +82,31 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
             'coord_dim': 3,
             'output_dim': 4
         }
-    
+        print(f"🔍 Using default config: {model_config}")
+
     model = CDAnet(**model_config)
-    model.load_state_dict(checkpoint['model_state_dict'])
+
+    # Check if state dict loads correctly
+    try:
+        model.load_state_dict(checkpoint['model_state_dict'])
+        print(f"✅ Model state dict loaded successfully")
+    except Exception as e:
+        print(f"❌ Error loading model state dict: {e}")
+        print(f"Model state dict keys: {list(model.state_dict().keys())[:5]}...")
+        if 'model_state_dict' in checkpoint:
+            print(f"Checkpoint state dict keys: {list(checkpoint['model_state_dict'].keys())[:5]}...")
+
     model.eval()
+
+    # Check if model parameters look reasonable
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f"🔍 Total model parameters: {total_params:,}")
+
+    # Check a few parameter values
+    for name, param in model.named_parameters():
+        print(f"🔍 {name}: shape {param.shape}, mean {param.mean().item():.6f}, std {param.std().item():.6f}")
+        if len(list(model.named_parameters())) > 5:  # Only show first few
+            break
     
     # Setup data with normalization (as per paper and training)
     normalize_data = True  # Paper uses normalized data for training
@@ -267,7 +290,20 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
             # Reshape to [T, H, W, C] - both predictions and targets should have same structure
             pred_reshaped = predictions.view(B, T_hr, H_hr, W_hr, C)  # [B, T, H, W, C]
             target_reshaped = targets.view(B, T_hr, H_hr, W_hr, C)    # [B, T, H, W, C]
-            low_res_reshaped = low_res.cpu().permute(0, 2, 3, 4, 1)  # [B, T, H, W, C]
+
+            # 🔧 FIXED: Also denormalize low-res input for fair comparison
+            low_res_cpu = low_res.cpu().permute(0, 2, 3, 4, 1)  # [B, T, H, W, C]
+
+            # Denormalize low-res input if normalizer exists
+            if data_module.normalizer is not None:
+                B_lr, T_lr, H_lr, W_lr, C_lr = low_res_cpu.shape
+                low_res_flat = low_res_cpu.view(-1, C_lr)
+                low_res_denorm = data_module.normalizer.denormalize(low_res_flat).view(low_res_cpu.shape)
+                low_res_reshaped = low_res_denorm
+                print(f"  🔧 Denormalized low-res input: range [{low_res_reshaped[0,:,:,:,0].min():.3f}, {low_res_reshaped[0,:,:,:,0].max():.3f}]")
+            else:
+                low_res_reshaped = low_res_cpu
+                print(f"  ⚠️  No normalizer - using raw low-res")
             
             results['predictions'].append(pred_reshaped[0])  # [T, H, W, C]
             results['truth_fields'].append(target_reshaped[0])
@@ -398,14 +434,26 @@ def main():
 
     print(f"Actual data range: [{data_min:.3f}, {data_max:.3f}], span: {data_range:.3f}")
 
-    # Use adaptive color limits or defaults
+    # 🎨 FIXED: Use proper color limits for Truth visualization
     if args.variable == 'T':
-        if data_range > 0.1:  # Use actual range if significant
-            vmin, vmax = data_min - 0.1 * data_range, data_max + 0.1 * data_range
-            print(f"Using adaptive color range: [{vmin:.3f}, {vmax:.3f}]")
-        else:
-            vmin, vmax = -0.5, 0.5
-            print(f"Using default color range: [{vmin:.3f}, {vmax:.3f}]")
+        # Use the same color range as input for fair comparison
+        input_min, input_max = input_var.min(), input_var.max()
+        truth_min, truth_max = truth_var.min(), truth_var.max()
+
+        print(f"Input range: [{input_min:.3f}, {input_max:.3f}]")
+        print(f"Truth range: [{truth_min:.3f}, {truth_max:.3f}]")
+
+        # Use the maximum range to ensure both input and truth are visible
+        combined_min = min(input_min, truth_min)
+        combined_max = max(input_max, truth_max)
+
+        # Add a bit of padding for better visualization
+        range_padding = (combined_max - combined_min) * 0.05
+        vmin = combined_min - range_padding
+        vmax = combined_max + range_padding
+
+        print(f"🎨 Using combined color range: [{vmin:.3f}, {vmax:.3f}]")
+
     elif args.variable in ['u', 'v']:
         vmin, vmax = -0.4, 0.4
     else:  # pressure
