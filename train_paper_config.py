@@ -53,8 +53,9 @@ def create_paper_config():
 
     # Optimizer configuration (paper settings)
     config.optimizer.optimizer_type = 'adam'  # Adam is more stable than SGD
-    config.optimizer.learning_rate = 0.1  # Paper range: 0.01-0.25, start with 0.1
+    config.optimizer.learning_rate = 0.01  # Start with conservative LR to avoid instability
     config.optimizer.weight_decay = 1e-4
+    config.optimizer.grad_clip_max_norm = 1.0  # Gradient clipping for stability
     config.optimizer.scheduler_type = 'plateau'
     config.optimizer.patience = 10  # Paper: reduce LR if no improvement in 10 epochs
     config.optimizer.factor = 0.1  # Paper: scale LR by 0.1
@@ -69,7 +70,7 @@ def create_paper_config():
     config.training.early_stopping = True
     config.training.patience = 20
     config.training.min_delta = 1e-6
-    config.training.use_amp = True  # Enable AMP for faster training
+    config.training.use_amp = False  # Disable AMP to avoid numerical instability
     config.training.device = 'cuda' if torch.cuda.is_available() else 'cpu'
     config.training.log_interval = 10
     config.training.output_dir = './outputs'

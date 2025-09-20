@@ -294,7 +294,7 @@ class CDAnetTrainer:
 
                 # Gradient clipping
                 self.scaler.unscale_(self.optimizer)
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.config.optimizer.grad_clip_max_norm)
 
                 self.scaler.step(self.optimizer)
                 self.scaler.update()
@@ -303,7 +303,7 @@ class CDAnetTrainer:
                 loss.backward()
 
                 # Gradient clipping
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.config.optimizer.grad_clip_max_norm)
 
                 self.optimizer.step()
 

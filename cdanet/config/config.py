@@ -74,7 +74,10 @@ class OptimizerConfig:
     learning_rate: float = 0.0001  # More stable learning rate
     momentum: float = 0.9
     weight_decay: float = 1e-4
-    
+
+    # Gradient clipping
+    grad_clip_max_norm: float = 1.0  # Maximum gradient norm for clipping
+
     # Learning rate scheduling
     scheduler_type: str = 'plateau'  # 'plateau', 'cosine', 'step'
     patience: int = 10  # For plateau scheduler
