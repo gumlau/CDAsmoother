@@ -539,26 +539,42 @@ def main():
         print(f"  Truth: [{truth_min:.3f}, {truth_max:.3f}] span={truth_max-truth_min:.3f}")
         print(f"  Pred:  [{pred_min:.3f}, {pred_max:.3f}] span={pred_max-pred_min:.3f}")
 
-        # 🔧 SOLUTION: Use percentile-based color range for better contrast
-        # This handles the case where data has outliers or wide ranges
+        # 🔧 SOLUTION: Use data-aware color mapping for both Input and Truth
 
-        # Calculate reasonable percentiles for Truth (which has the widest range)
+        # Calculate percentiles for both Input and Truth
+        input_flat = input_var.flatten()
         truth_flat = truth_var.flatten()
-        truth_p5 = np.percentile(truth_flat, 5)
-        truth_p95 = np.percentile(truth_flat, 95)
 
-        # Use symmetric range around the median for temperature data
+        input_p5, input_p95 = np.percentile(input_flat, [5, 95])
+        truth_p5, truth_p95 = np.percentile(truth_flat, [5, 95])
+
+        input_median = np.median(input_flat)
         truth_median = np.median(truth_flat)
-        truth_range = max(truth_p95 - truth_median, truth_median - truth_p5)
 
-        # Create symmetric color range
-        vmin = truth_median - truth_range * 1.2  # Extra padding for visibility
-        vmax = truth_median + truth_range * 1.2
+        print(f"🎨 Data-aware color mapping:")
+        print(f"  Input p5-p95: [{input_p5:.3f}, {input_p95:.3f}], median: {input_median:.3f}")
+        print(f"  Truth p5-p95: [{truth_p5:.3f}, {truth_p95:.3f}], median: {truth_median:.3f}")
 
-        print(f"🎨 Using percentile-based color range:")
-        print(f"  Truth median: {truth_median:.3f}")
-        print(f"  Truth p5-p95: [{truth_p5:.3f}, {truth_p95:.3f}]")
-        print(f"  Final color range: [{vmin:.3f}, {vmax:.3f}]")
+        # Strategy: Use a color range that shows both datasets well
+        # Take the wider range but ensure both datasets are visible
+
+        # Find the range that includes both datasets' main content
+        combined_p5 = min(input_p5, truth_p5)
+        combined_p95 = max(input_p95, truth_p95)
+        combined_median = (input_median + truth_median) / 2
+
+        # Create symmetric range around combined median
+        range_span = max(combined_p95 - combined_median, combined_median - combined_p5)
+
+        vmin = combined_median - range_span * 1.1  # Small padding
+        vmax = combined_median + range_span * 1.1
+
+        print(f"  Combined range: [{vmin:.3f}, {vmax:.3f}], center: {combined_median:.3f}")
+
+        # Safety check: ensure range is reasonable
+        if vmax - vmin < 0.1:  # Too narrow
+            print(f"  ⚠️  Range too narrow, using wider default")
+            vmin, vmax = combined_median - 0.3, combined_median + 0.3
 
     elif args.variable in ['u', 'v']:
         vmin, vmax = -0.4, 0.4
