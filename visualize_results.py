@@ -201,27 +201,37 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
                 pred_range = predictions_cpu.max() - predictions_cpu.min()
                 if pred_range < 1e-6:
                     print(f"  ⚠️ WARNING: Predictions are constant in normalized space (range={pred_range:.8f})")
-                    print(f"  This suggests the model outputs are not varying properly")
-                    # Use raw predictions without denormalization
-                    predictions_denorm = predictions_cpu
-                    targets_denorm = targets_cpu
+                    print(f"  Using raw predictions without denormalization")
+                    predictions_denorm = predictions_cpu * 0.3 + 0.5  # Scale for visualization
+                    targets_denorm = targets_cpu * 0.3 + 0.5
                 else:
-                    # Normal denormalization
+                    # Try denormalization but check result
                     try:
-                        predictions_denorm = data_module.normalizer.denormalize(predictions_cpu.view(-1, 4)).view(predictions_cpu.shape)
-                        targets_denorm = data_module.normalizer.denormalize(targets_cpu.view(-1, 4)).view(targets_cpu.shape)
+                        predictions_denorm_test = data_module.normalizer.denormalize(predictions_cpu.view(-1, 4)).view(predictions_cpu.shape)
+                        targets_denorm_test = data_module.normalizer.denormalize(targets_cpu.view(-1, 4)).view(targets_cpu.shape)
 
-                        # Check for issues after denormalization
-                        denorm_range = predictions_denorm.max() - predictions_denorm.min()
-                        if denorm_range < 1e-6:
-                            print(f"  ⚠️ WARNING: Denormalization made predictions constant (range={denorm_range:.8f})")
-                            print(f"  Using raw predictions instead")
-                            predictions_denorm = predictions_cpu * 0.3 + 0.5  # Scale for visualization
+                        # Check if denormalization destroyed variation
+                        denorm_range = predictions_denorm_test.max() - predictions_denorm_test.min()
+                        denorm_std = predictions_denorm_test.std()
+
+                        print(f"  🔧 Denormalization test: range={denorm_range:.8f}, std={denorm_std:.8f}")
+
+                        if denorm_range < 1e-6 or denorm_std < 1e-6:
+                            print(f"  ⚠️ WARNING: Denormalization destroyed variation!")
+                            print(f"  Problem: normalizer stats don't match training data")
+                            print(f"  Solution: using scaled raw predictions for visualization")
+                            # Use scaled raw predictions that preserve variation
+                            predictions_denorm = predictions_cpu * 0.3 + 0.5  # Scale to [0.2, 0.8] range
                             targets_denorm = targets_cpu * 0.3 + 0.5
+                        else:
+                            print(f"  ✅ Denormalization preserved variation")
+                            predictions_denorm = predictions_denorm_test
+                            targets_denorm = targets_denorm_test
 
                     except Exception as e:
-                        print(f"⚠️ WARNING: Denormalization failed ({e}), using scaled raw predictions")
-                        predictions_denorm = predictions_cpu * 0.3 + 0.5  # Scale for visualization
+                        print(f"  ⚠️ WARNING: Denormalization failed ({e})")
+                        print(f"  Using scaled raw predictions")
+                        predictions_denorm = predictions_cpu * 0.3 + 0.5
                         targets_denorm = targets_cpu * 0.3 + 0.5
             else:
                 print("  📊 No normalizer found, using raw predictions")
