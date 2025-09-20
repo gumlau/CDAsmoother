@@ -186,31 +186,63 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
             print(f"    Expected total points: {T_hr * H_hr * W_hr}")
             print(f"    Actual total points N: {N}")
 
-            # Handle dimension mismatch by using the correct original data structure
+            # Handle dimension mismatch by calculating correct dimensions from actual data
             if T_hr * H_hr * W_hr != N:
-                print(f"  ⚠️  Using original data dimensions...")
+                print(f"  ⚠️  Dimension mismatch! Calculating from actual data...")
 
-                # Use the actual original RB data dimensions
-                # The model was trained on data with these exact dimensions
-                T_hr = 8  # Standard clip length
-                H_hr = 170  # Original height from RB data
-                W_hr = 512  # Original width from RB data
+                # Try common clip lengths
+                for test_T in [8, 4, 16, 32]:
+                    spatial_points = N // test_T
+                    if N % test_T == 0:  # Make sure it divides evenly
+                        # Try to match the original RB aspect ratio (170:512 ≈ 1:3)
+                        aspect_ratio = 512 / 170  # ≈ 3.01
 
-                # Check if this matches
-                if T_hr * H_hr * W_hr == N:
-                    print(f"    ✅ Perfect match: T={T_hr}, H={H_hr}, W={W_hr}")
-                else:
-                    # Try with downsampled versions
-                    for ds in [1, 2, 4, 8]:
-                        test_H = 170 // ds
-                        test_W = 512 // ds
-                        if T_hr * test_H * test_W == N:
-                            H_hr, W_hr = test_H, test_W
-                            print(f"    ✅ Found match with downsample {ds}: T={T_hr}, H={H_hr}, W={W_hr}")
+                        # For downsampled data, try different downsampling factors
+                        for ds in [1, 2, 4, 8, 16]:
+                            target_H = 170 // ds
+                            target_W = 512 // ds
+
+                            if target_H * target_W == spatial_points:
+                                T_hr, H_hr, W_hr = test_T, target_H, target_W
+                                print(f"    ✅ Found exact match: T={T_hr}, H={H_hr}, W={W_hr} (downsample={ds})")
+                                break
+
+                        # Also try the computed dimensions from low-res input
+                        computed_H = H_lr * spatial_downsample
+                        computed_W = W_lr * spatial_downsample
+                        if computed_H * computed_W == spatial_points:
+                            T_hr, H_hr, W_hr = test_T, computed_H, computed_W
+                            print(f"    ✅ Found match from low-res: T={T_hr}, H={H_hr}, W={W_hr}")
                             break
-                    else:
-                        # Last resort: use calculated dimensions but warn
-                        print(f"    ⚠️  No exact match found. Using calculated dimensions.")
+                        else:
+                            # Try to find best factorization that preserves aspect ratio
+                            best_diff = float('inf')
+                            best_h = best_w = 1
+
+                            for h in range(1, int(spatial_points**0.5) + 50):
+                                if spatial_points % h == 0:
+                                    w = spatial_points // h
+                                    # Prefer aspect ratios close to original (w/h ≈ 3)
+                                    current_ratio = w / h
+                                    ratio_diff = abs(current_ratio - aspect_ratio)
+
+                                    if ratio_diff < best_diff:
+                                        best_diff = ratio_diff
+                                        best_h, best_w = h, w
+
+                            if best_diff < 2.0:  # Accept if reasonably close to target ratio
+                                T_hr, H_hr, W_hr = test_T, best_h, best_w
+                                print(f"    ✅ Found good match: T={T_hr}, H={H_hr}, W={W_hr} (ratio={best_w/best_h:.2f})")
+                                break
+
+                if T_hr * H_hr * W_hr != N:
+                    print(f"    ⚠️  Last resort: using most square factorization")
+                    # Fallback to square-ish factorization but with T=8
+                    T_hr = 8
+                    spatial_points = N // T_hr
+                    H_hr = int(spatial_points ** 0.5)
+                    W_hr = spatial_points // H_hr
+                    print(f"    Final fallback: T={T_hr}, H={H_hr}, W={W_hr}")
 
             print(f"  📐 Final dimensions: T={T_hr}, H={H_hr}, W={W_hr}")
 
