@@ -184,32 +184,49 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
             predictions = model(low_res, coords)
             print(f"    Prediction T range: [{predictions[0,:,0].min().item():.3f}, {predictions[0,:,0].max().item():.3f}]")
 
-            # CRITICAL: Denormalize predictions and targets for visualization
+            # CRITICAL: Handle denormalization carefully
+            predictions_cpu = predictions.cpu()
+            targets_cpu = targets.cpu()
+
+            # 🔧 DEBUG: Check raw predictions before denormalization
+            print(f"  🔍 Raw predictions range: [{predictions_cpu.min().item():.6f}, {predictions_cpu.max().item():.6f}]")
+            print(f"  🔍 Raw predictions std: {predictions_cpu.std().item():.6f}")
+
             if data_module.normalizer is not None:
-                # Move data to CPU before denormalization to match normalizer device
-                predictions_cpu = predictions.cpu()
-                targets_cpu = targets.cpu()
+                print(f"  📊 Normalizer stats:")
+                print(f"    Mean: {data_module.normalizer.mean}")
+                print(f"    Std: {data_module.normalizer.std}")
 
-                # Robust denormalization with error handling
-                try:
-                    predictions_denorm = data_module.normalizer.denormalize(predictions_cpu.view(-1, 4)).view(predictions_cpu.shape)
-                    targets_denorm = data_module.normalizer.denormalize(targets_cpu.view(-1, 4)).view(targets_cpu.shape)
-
-                    # Check for NaN/Inf after denormalization
-                    if torch.isnan(predictions_denorm).any() or torch.isinf(predictions_denorm).any():
-                        print("⚠️ WARNING: Denormalization produced NaN/Inf, using raw predictions")
-                        predictions_denorm = predictions_cpu
-                    if torch.isnan(targets_denorm).any() or torch.isinf(targets_denorm).any():
-                        print("⚠️ WARNING: Denormalization produced NaN/Inf in targets, using raw targets")
-                        targets_denorm = targets_cpu
-
-                except Exception as e:
-                    print(f"⚠️ WARNING: Denormalization failed ({e}), using raw predictions")
+                # Check if predictions are all the same (normalized space)
+                pred_range = predictions_cpu.max() - predictions_cpu.min()
+                if pred_range < 1e-6:
+                    print(f"  ⚠️ WARNING: Predictions are constant in normalized space (range={pred_range:.8f})")
+                    print(f"  This suggests the model outputs are not varying properly")
+                    # Use raw predictions without denormalization
                     predictions_denorm = predictions_cpu
                     targets_denorm = targets_cpu
+                else:
+                    # Normal denormalization
+                    try:
+                        predictions_denorm = data_module.normalizer.denormalize(predictions_cpu.view(-1, 4)).view(predictions_cpu.shape)
+                        targets_denorm = data_module.normalizer.denormalize(targets_cpu.view(-1, 4)).view(targets_cpu.shape)
+
+                        # Check for issues after denormalization
+                        denorm_range = predictions_denorm.max() - predictions_denorm.min()
+                        if denorm_range < 1e-6:
+                            print(f"  ⚠️ WARNING: Denormalization made predictions constant (range={denorm_range:.8f})")
+                            print(f"  Using raw predictions instead")
+                            predictions_denorm = predictions_cpu * 0.3 + 0.5  # Scale for visualization
+                            targets_denorm = targets_cpu * 0.3 + 0.5
+
+                    except Exception as e:
+                        print(f"⚠️ WARNING: Denormalization failed ({e}), using scaled raw predictions")
+                        predictions_denorm = predictions_cpu * 0.3 + 0.5  # Scale for visualization
+                        targets_denorm = targets_cpu * 0.3 + 0.5
             else:
-                predictions_denorm = predictions.cpu()
-                targets_denorm = targets.cpu()
+                print("  📊 No normalizer found, using raw predictions")
+                predictions_denorm = predictions_cpu
+                targets_denorm = targets_cpu
 
             # Use denormalized data for visualization (on CPU)
             predictions = predictions_denorm
