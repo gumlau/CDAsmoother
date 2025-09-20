@@ -214,11 +214,17 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
                         denorm_range = predictions_denorm_test.max() - predictions_denorm_test.min()
                         denorm_std = predictions_denorm_test.std()
 
+                        # Check T field specifically (most important for visualization)
+                        t_field_range = predictions_denorm_test[0,:,0].max() - predictions_denorm_test[0,:,0].min()
+                        t_field_std = predictions_denorm_test[0,:,0].std()
+
                         print(f"  🔧 Denormalization test: range={denorm_range:.8f}, std={denorm_std:.8f}")
                         print(f"  🔧 Raw predictions: range={pred_range:.8f}, std={predictions_cpu.std():.8f}")
                         print(f"  🔧 Test predictions T field: [{predictions_denorm_test[0,:,0].min():.6f}, {predictions_denorm_test[0,:,0].max():.6f}]")
+                        print(f"  🔧 T field range: {t_field_range:.8f}, std: {t_field_std:.8f}")
 
-                        if denorm_range < 1e-6 or denorm_std < 1e-6:
+                        # Check if T field specifically has insufficient variation
+                        if t_field_range < 1e-4 or t_field_std < 1e-4:
                             print(f"  ⚠️ WARNING: Denormalization destroyed variation!")
                             print(f"  Problem: normalizer stats don't match training data")
                             print(f"  Solution: using scaled raw predictions for visualization")
