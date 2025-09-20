@@ -233,9 +233,14 @@ class RBDataModule:
             self.data_loaders[key] = loader
             print(f"Created data loader for {key}: {len(dataset)} samples, {len(loader)} batches")
             
-    def get_dataloader(self, Ra: float, split: str = 'train'):
+    def get_dataloader(self, Ra_or_key, split: str = 'train'):
         """Get data loader for specific Ra and split."""
-        key = f"Ra_{Ra:.0e}_{split}"
+        if isinstance(Ra_or_key, str) and '_' in Ra_or_key:
+            # If it's already a key like 'Ra_1e+05_train', use it directly
+            key = Ra_or_key
+        else:
+            # If it's a Ra number, format it
+            key = f"Ra_{Ra_or_key:.0e}_{split}"
         if key not in self.data_loaders:
             raise KeyError(f"Data loader not found for {key}. Available: {list(self.data_loaders.keys())}")
         return self.data_loaders[key]

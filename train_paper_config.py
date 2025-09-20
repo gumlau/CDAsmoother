@@ -62,14 +62,14 @@ def create_paper_config():
     config.optimizer.min_lr = 1e-6
 
     # Training configuration (paper settings)
-    config.training.num_epochs = 100  # Paper: 100 epochs
-    config.training.clips_per_epoch = 1000  # Reduced from 3000 but still substantial training
+    config.training.num_epochs = 500  # Increase epochs for more thorough training
+    config.training.clips_per_epoch = 617  # Use all available clips per epoch
     config.training.val_interval = 5
     config.training.checkpoint_interval = 10
     config.training.save_best = True
     config.training.early_stopping = True
-    config.training.patience = 20
-    config.training.min_delta = 1e-6
+    config.training.patience = 50  # More patience for longer training
+    config.training.min_delta = 1e-7  # Smaller threshold for improvement
     config.training.use_amp = False  # Disable AMP to avoid numerical instability
     config.training.device = 'cuda' if torch.cuda.is_available() else 'cpu'
     config.training.log_interval = 10

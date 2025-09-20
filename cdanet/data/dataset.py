@@ -121,7 +121,7 @@ class RBDataset(Dataset):
 
         # Create clips with overlapping
         for i in range(0, max_clips, step_size):
-            if i + self.clip_length > max_clips:
+            if i + self.clip_length > self.T_low:
                 break
 
             # Low-resolution clip
