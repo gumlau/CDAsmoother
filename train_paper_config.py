@@ -63,7 +63,7 @@ def create_paper_config():
 
     # Training configuration (paper settings)
     config.training.num_epochs = 100  # Paper: 100 epochs
-    config.training.clips_per_epoch = 3000  # Paper: 3,000 clips per epoch
+    config.training.clips_per_epoch = 1000  # Reduced from 3000 but still substantial training
     config.training.val_interval = 5
     config.training.checkpoint_interval = 10
     config.training.save_best = True
@@ -139,7 +139,7 @@ def main():
                     Ra=1e5,
                     nx=256,  # Smaller for faster generation
                     ny=64,   # Smaller for faster generation
-                    nt=800   # Enough timesteps for clips (need > clip_length * temporal_downsample)
+                    nt=2000  # More timesteps for more clips (need > clip_length * temporal_downsample)
                 )
 
                 print(f"✅ Generated synthetic data: {synthetic_file}")
@@ -150,7 +150,7 @@ def main():
 
                 # Fallback: run rb_simulation.py
                 import subprocess
-                result = subprocess.run(['python3', 'rb_simulation.py', '--Ra', '1e5', '--n_runs', '3'],
+                result = subprocess.run(['python3', 'rb_simulation.py', '--Ra', '1e5', '--n_runs', '5'],
                                       capture_output=True, text=True)
                 if result.returncode != 0:
                     print(f"❌ RB simulation failed: {result.stderr}")

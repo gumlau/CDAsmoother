@@ -109,25 +109,32 @@ class RBDataset(Dataset):
         """Split data into overlapping temporal clips."""
         self.clips_low = []
         self.clips_high = []
-        
+
         # Determine available clips
         max_clips_low = max(0, self.T_low - self.clip_length + 1)
         max_clips_high = max(0, self.T_steps - self.clip_length * self.temporal_downsample + 1)
-        
+
         max_clips = min(max_clips_low, max_clips_high // self.temporal_downsample)
-        
-        for i in range(max_clips):
+
+        # Use smaller step size to create more overlapping clips for training data
+        step_size = 1 if self.split == 'train' else max(1, self.clip_length // 2)
+
+        # Create clips with overlapping
+        for i in range(0, max_clips, step_size):
+            if i + self.clip_length > max_clips:
+                break
+
             # Low-resolution clip
             low_clip = self.low_res_data[i:i + self.clip_length]  # [8, 4, H_low, W_low]
             self.clips_low.append(low_clip)
-            
-            # Corresponding high-resolution clip  
+
+            # Corresponding high-resolution clip
             start_high = i * self.temporal_downsample
             end_high = start_high + self.clip_length * self.temporal_downsample
             high_indices = torch.arange(start_high, end_high, self.temporal_downsample)
             high_clip = self.high_res_data[high_indices].permute(0, 3, 1, 2)  # [8, 4, H_high, W_high]
             self.clips_high.append(high_clip)
-            
+
         print(f"Created {len(self.clips_low)} clips for {self.split} split")
         
     def _setup_coordinates(self):
