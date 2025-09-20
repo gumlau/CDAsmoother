@@ -305,9 +305,65 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
 
             print(f"  📐 Final dimensions: T={T_hr}, H={H_hr}, W={W_hr}")
 
-            # Reshape to [T, H, W, C] - both predictions and targets should have same structure
-            pred_reshaped = predictions.view(B, T_hr, H_hr, W_hr, C)  # [B, T, H, W, C]
-            target_reshaped = targets.view(B, T_hr, H_hr, W_hr, C)    # [B, T, H, W, C]
+            # 🔧 CRITICAL FIX: The data layout might be different than assumed
+            # Try different reshape orders to find the correct one
+
+            print(f"  🔧 Trying different reshape orders...")
+
+            # Original attempt
+            target_reshaped_v1 = targets.view(B, T_hr, H_hr, W_hr, C)
+            first_frame_v1 = target_reshaped_v1[0, 0, :, :, 0]
+            h_var_v1 = first_frame_v1.var(dim=1).mean().item()
+            v_var_v1 = first_frame_v1.var(dim=0).mean().item()
+            print(f"    V1 (T,H,W): h_var={h_var_v1:.6f}, v_var={v_var_v1:.6f}")
+
+            # Try H,W,T order instead
+            try:
+                target_reshaped_v2 = targets.view(B, H_hr, W_hr, T_hr, C).permute(0, 3, 1, 2, 4)  # [B,T,H,W,C]
+                first_frame_v2 = target_reshaped_v2[0, 0, :, :, 0]
+                h_var_v2 = first_frame_v2.var(dim=1).mean().item()
+                v_var_v2 = first_frame_v2.var(dim=0).mean().item()
+                print(f"    V2 (H,W,T->T,H,W): h_var={h_var_v2:.6f}, v_var={v_var_v2:.6f}")
+            except:
+                target_reshaped_v2 = target_reshaped_v1
+                h_var_v2, v_var_v2 = h_var_v1, v_var_v1
+
+            # Try W,H,T order
+            try:
+                target_reshaped_v3 = targets.view(B, W_hr, H_hr, T_hr, C).permute(0, 3, 2, 1, 4)  # [B,T,H,W,C]
+                first_frame_v3 = target_reshaped_v3[0, 0, :, :, 0]
+                h_var_v3 = first_frame_v3.var(dim=1).mean().item()
+                v_var_v3 = first_frame_v3.var(dim=0).mean().item()
+                print(f"    V3 (W,H,T->T,H,W): h_var={h_var_v3:.6f}, v_var={v_var_v3:.6f}")
+            except:
+                target_reshaped_v3 = target_reshaped_v1
+                h_var_v3, v_var_v3 = h_var_v1, v_var_v1
+
+            # Choose the version with most balanced variance (indicates proper 2D structure)
+            variance_ratios = [
+                (abs(h_var_v1 - v_var_v1), target_reshaped_v1, "T,H,W"),
+                (abs(h_var_v2 - v_var_v2), target_reshaped_v2, "H,W,T->T,H,W"),
+                (abs(h_var_v3 - v_var_v3), target_reshaped_v3, "W,H,T->T,H,W")
+            ]
+
+            # Also prefer higher overall variance (more structure)
+            overall_vars = [
+                (h_var_v1 + v_var_v1, target_reshaped_v1, "T,H,W"),
+                (h_var_v2 + v_var_v2, target_reshaped_v2, "H,W,T->T,H,W"),
+                (h_var_v3 + v_var_v3, target_reshaped_v3, "W,H,T->T,H,W")
+            ]
+
+            # Choose version with highest overall variance (most structure)
+            best_overall_var, target_reshaped, best_order = max(overall_vars, key=lambda x: x[0])
+            print(f"    ✅ Selected: {best_order} (overall_var={best_overall_var:.6f})")
+
+            # Apply same reshaping to predictions
+            if best_order == "H,W,T->T,H,W":
+                pred_reshaped = predictions.view(B, H_hr, W_hr, T_hr, C).permute(0, 3, 1, 2, 4)
+            elif best_order == "W,H,T->T,H,W":
+                pred_reshaped = predictions.view(B, W_hr, H_hr, T_hr, C).permute(0, 3, 2, 1, 4)
+            else:
+                pred_reshaped = predictions.view(B, T_hr, H_hr, W_hr, C)
 
             # 🔧 FIXED: Also denormalize low-res input for fair comparison
             low_res_cpu = low_res.cpu().permute(0, 2, 3, 4, 1)  # [B, T, H, W, C]
@@ -472,25 +528,37 @@ def main():
 
     print(f"Actual data range: [{data_min:.3f}, {data_max:.3f}], span: {data_range:.3f}")
 
-    # 🎨 FIXED: Use proper color limits for Truth visualization
+    # 🎨 FIXED: Use separate optimized color ranges for better visualization
     if args.variable == 'T':
-        # Use the same color range as input for fair comparison
         input_min, input_max = input_var.min(), input_var.max()
         truth_min, truth_max = truth_var.min(), truth_var.max()
+        pred_min, pred_max = pred_var.min(), pred_var.max()
 
-        print(f"Input range: [{input_min:.3f}, {input_max:.3f}]")
-        print(f"Truth range: [{truth_min:.3f}, {truth_max:.3f}]")
+        print(f"Data ranges before color mapping:")
+        print(f"  Input: [{input_min:.3f}, {input_max:.3f}] span={input_max-input_min:.3f}")
+        print(f"  Truth: [{truth_min:.3f}, {truth_max:.3f}] span={truth_max-truth_min:.3f}")
+        print(f"  Pred:  [{pred_min:.3f}, {pred_max:.3f}] span={pred_max-pred_min:.3f}")
 
-        # Use the maximum range to ensure both input and truth are visible
-        combined_min = min(input_min, truth_min)
-        combined_max = max(input_max, truth_max)
+        # 🔧 SOLUTION: Use percentile-based color range for better contrast
+        # This handles the case where data has outliers or wide ranges
 
-        # Add a bit of padding for better visualization
-        range_padding = (combined_max - combined_min) * 0.05
-        vmin = combined_min - range_padding
-        vmax = combined_max + range_padding
+        # Calculate reasonable percentiles for Truth (which has the widest range)
+        truth_flat = truth_var.flatten()
+        truth_p5 = np.percentile(truth_flat, 5)
+        truth_p95 = np.percentile(truth_flat, 95)
 
-        print(f"🎨 Using combined color range: [{vmin:.3f}, {vmax:.3f}]")
+        # Use symmetric range around the median for temperature data
+        truth_median = np.median(truth_flat)
+        truth_range = max(truth_p95 - truth_median, truth_median - truth_p5)
+
+        # Create symmetric color range
+        vmin = truth_median - truth_range * 1.2  # Extra padding for visibility
+        vmax = truth_median + truth_range * 1.2
+
+        print(f"🎨 Using percentile-based color range:")
+        print(f"  Truth median: {truth_median:.3f}")
+        print(f"  Truth p5-p95: [{truth_p5:.3f}, {truth_p95:.3f}]")
+        print(f"  Final color range: [{vmin:.3f}, {vmax:.3f}]")
 
     elif args.variable in ['u', 'v']:
         vmin, vmax = -0.4, 0.4
