@@ -215,6 +215,8 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
                         denorm_std = predictions_denorm_test.std()
 
                         print(f"  🔧 Denormalization test: range={denorm_range:.8f}, std={denorm_std:.8f}")
+                        print(f"  🔧 Raw predictions: range={pred_range:.8f}, std={predictions_cpu.std():.8f}")
+                        print(f"  🔧 Test predictions T field: [{predictions_denorm_test[0,:,0].min():.6f}, {predictions_denorm_test[0,:,0].max():.6f}]")
 
                         if denorm_range < 1e-6 or denorm_std < 1e-6:
                             print(f"  ⚠️ WARNING: Denormalization destroyed variation!")
@@ -222,9 +224,9 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
                             print(f"  Solution: using scaled raw predictions for visualization")
                             # Use scaled raw predictions that preserve variation
                             predictions_denorm = predictions_cpu * 0.3 + 0.5  # Scale to [0.2, 0.8] range
-                            targets_denorm = targets_cpu * 0.3 + 0.5
+                            targets_denorm = targets_denorm_test  # Use properly denormalized targets
                         else:
-                            print(f"  ✅ Denormalization preserved variation")
+                            print(f"  ✅ Denormalization preserved variation - using denormalized predictions")
                             predictions_denorm = predictions_denorm_test
                             targets_denorm = targets_denorm_test
 
