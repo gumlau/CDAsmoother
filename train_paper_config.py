@@ -64,8 +64,8 @@ def create_paper_config():
     # Training configuration (paper settings)
     config.training.num_epochs = 500  # Increase epochs for more thorough training
     config.training.clips_per_epoch = 617  # Use all available clips per epoch
-    config.training.val_interval = 5
-    config.training.checkpoint_interval = 10
+    config.training.val_interval = 10
+    config.training.checkpoint_interval = 50  # Save checkpoints less frequently
     config.training.save_best = True
     config.training.early_stopping = True
     config.training.patience = 50  # More patience for longer training

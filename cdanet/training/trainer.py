@@ -459,8 +459,26 @@ class CDAnetTrainer:
             'metrics': metrics
         }
         
-        torch.save(checkpoint, checkpoint_path)
-        self.logger.save_checkpoint_info(checkpoint_path, epoch, metrics)
+        try:
+            torch.save(checkpoint, checkpoint_path)
+            self.logger.save_checkpoint_info(checkpoint_path, epoch, metrics)
+        except Exception as e:
+            self.logger.warning(f"Failed to save checkpoint: {e}")
+            # Try saving with a different name
+            backup_path = checkpoint_path.replace('.pth', '_backup.pth')
+            try:
+                # Save only essential parts
+                minimal_checkpoint = {
+                    'epoch': epoch,
+                    'model_state_dict': self.model.state_dict(),
+                    'best_val_loss': self.best_val_loss,
+                    'config': self.config.to_dict()
+                }
+                torch.save(minimal_checkpoint, backup_path)
+                self.logger.info(f"Saved minimal checkpoint to {backup_path}")
+            except Exception as e2:
+                self.logger.error(f"Failed to save backup checkpoint: {e2}")
+                # Continue training without saving this checkpoint
         
         if is_best:
             val_loss = metrics.get('total_loss', metrics.get('loss', float('inf')))
