@@ -190,8 +190,23 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
                 predictions_cpu = predictions.cpu()
                 targets_cpu = targets.cpu()
 
-                predictions_denorm = data_module.normalizer.denormalize(predictions_cpu.view(-1, 4)).view(predictions_cpu.shape)
-                targets_denorm = data_module.normalizer.denormalize(targets_cpu.view(-1, 4)).view(targets_cpu.shape)
+                # Robust denormalization with error handling
+                try:
+                    predictions_denorm = data_module.normalizer.denormalize(predictions_cpu.view(-1, 4)).view(predictions_cpu.shape)
+                    targets_denorm = data_module.normalizer.denormalize(targets_cpu.view(-1, 4)).view(targets_cpu.shape)
+
+                    # Check for NaN/Inf after denormalization
+                    if torch.isnan(predictions_denorm).any() or torch.isinf(predictions_denorm).any():
+                        print("⚠️ WARNING: Denormalization produced NaN/Inf, using raw predictions")
+                        predictions_denorm = predictions_cpu
+                    if torch.isnan(targets_denorm).any() or torch.isinf(targets_denorm).any():
+                        print("⚠️ WARNING: Denormalization produced NaN/Inf in targets, using raw targets")
+                        targets_denorm = targets_cpu
+
+                except Exception as e:
+                    print(f"⚠️ WARNING: Denormalization failed ({e}), using raw predictions")
+                    predictions_denorm = predictions_cpu
+                    targets_denorm = targets_cpu
             else:
                 predictions_denorm = predictions.cpu()
                 targets_denorm = targets.cpu()
@@ -199,6 +214,19 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
             # Use denormalized data for visualization (on CPU)
             predictions = predictions_denorm
             targets = targets_denorm
+
+            # Check for all-zero predictions (common visualization issue)
+            if torch.allclose(predictions, torch.zeros_like(predictions), atol=1e-8):
+                print("⚠️ WARNING: All predictions are zero! This will show as white in visualization.")
+                print("  This might indicate:")
+                print("  1. Model wasn't properly trained")
+                print("  2. Normalization/denormalization issue")
+                print("  3. Model output scaling problem")
+
+            # Check for constant predictions
+            pred_std = predictions.std().item()
+            if pred_std < 1e-6:
+                print(f"⚠️ WARNING: Predictions have very low variation (std={pred_std:.8f})")
 
             # Debug denormalized data ranges
             print(f"  📈 Value ranges (AFTER denormalization):")
@@ -544,9 +572,20 @@ def main():
         # Calculate percentiles for both Input and Truth
         input_flat = input_var.flatten()
         truth_flat = truth_var.flatten()
+        pred_flat = pred_var.flatten()
+
+        # Check for all-zero or constant prediction data
+        pred_range = pred_max - pred_min
+        if pred_range < 1e-8:
+            print(f"⚠️ WARNING: Prediction range is too small ({pred_range:.10f})")
+            print("  Adding small noise to prediction for visualization")
+            pred_var = pred_var + np.random.normal(0, abs(np.mean(pred_var)) * 0.01 + 1e-6, pred_var.shape)
+            pred_flat = pred_var.flatten()
+            pred_min, pred_max = pred_var.min(), pred_var.max()
 
         input_p5, input_p95 = np.percentile(input_flat, [5, 95])
         truth_p5, truth_p95 = np.percentile(truth_flat, [5, 95])
+        pred_p5, pred_p95 = np.percentile(pred_flat, [5, 95])
 
         input_median = np.median(input_flat)
         truth_median = np.median(truth_flat)
