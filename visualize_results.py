@@ -162,6 +162,24 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
             print(f"    Low-res T mean/std: {low_res[0,0,:,:,0].mean().item():.3f}/{low_res[0,0,:,:,0].std().item():.3f}")
             print(f"    Target T mean/std: {targets[0,:,0].mean().item():.3f}/{targets[0,:,0].std().item():.3f}")
 
+            # 🔍 DEBUG: Check target data structure before reshaping
+            print(f"  🔍 Target data analysis:")
+            print(f"    Target tensor shape: {targets.shape}")  # Should be [1, N, 4]
+            target_T_flat = targets[0, :, 0]  # [N] - flattened temperature field
+            print(f"    Flat target T: min={target_T_flat.min():.3f}, max={target_T_flat.max():.3f}")
+
+            # Check if the flattened data shows any patterns
+            print(f"    First 10 values: {target_T_flat[:10].tolist()}")
+            print(f"    Values 1000-1010: {target_T_flat[1000:1010].tolist()}")
+
+            # Check variance in chunks
+            chunk_size = 1000
+            chunk_vars = []
+            for i in range(0, min(10000, len(target_T_flat)), chunk_size):
+                chunk = target_T_flat[i:i+chunk_size]
+                chunk_vars.append(chunk.var().item())
+            print(f"    Variance in chunks: {chunk_vars[:5]}")  # Show first 5 chunks
+
             # Get predictions (these will be normalized)
             predictions = model(low_res, coords)
             print(f"    Prediction T range: [{predictions[0,:,0].min().item():.3f}, {predictions[0,:,0].max().item():.3f}]")
@@ -305,6 +323,25 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
                 low_res_reshaped = low_res_cpu
                 print(f"  ⚠️  No normalizer - using raw low-res")
             
+            # 🔍 DEBUG: Check reshaped truth data quality
+            truth_sample = target_reshaped[0]  # [T, H, W, C]
+            print(f"  🔍 Truth after reshape: shape {truth_sample.shape}")
+            print(f"    T field stats: min={truth_sample[:,:,:,0].min():.3f}, max={truth_sample[:,:,:,0].max():.3f}")
+            print(f"    T field mean per timestep: {[truth_sample[t,:,:,0].mean().item():.3f for t in range(min(3, truth_sample.shape[0]))]}")
+
+            # Check if truth has the stripe problem
+            first_timestep = truth_sample[0, :, :, 0]  # [H, W]
+            print(f"    First timestep shape: {first_timestep.shape}")
+
+            # Check for horizontal stripes (values should vary across width)
+            horizontal_variance = first_timestep.var(dim=1).mean()  # Variance across width for each row
+            vertical_variance = first_timestep.var(dim=0).mean()    # Variance across height for each column
+            print(f"    Horizontal variance: {horizontal_variance:.6f}")
+            print(f"    Vertical variance: {vertical_variance:.6f}")
+
+            if horizontal_variance < 0.001:
+                print(f"  ⚠️  WARNING: Truth shows horizontal stripe pattern!")
+
             results['predictions'].append(pred_reshaped[0])  # [T, H, W, C]
             results['truth_fields'].append(target_reshaped[0])
             results['input_fields'].append(low_res_reshaped[0])
