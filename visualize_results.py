@@ -327,7 +327,8 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
             truth_sample = target_reshaped[0]  # [T, H, W, C]
             print(f"  🔍 Truth after reshape: shape {truth_sample.shape}")
             print(f"    T field stats: min={truth_sample[:,:,:,0].min():.3f}, max={truth_sample[:,:,:,0].max():.3f}")
-            print(f"    T field mean per timestep: {[truth_sample[t,:,:,0].mean().item():.3f for t in range(min(3, truth_sample.shape[0]))]}")
+            timestep_means = [truth_sample[t,:,:,0].mean().item() for t in range(min(3, truth_sample.shape[0]))]
+            print(f"    T field mean per timestep: {[f'{x:.3f}' for x in timestep_means]}")
 
             # Check if truth has the stripe problem
             first_timestep = truth_sample[0, :, :, 0]  # [H, W]
