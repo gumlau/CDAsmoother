@@ -133,9 +133,11 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
             print(f"    Coords: {coords.shape}")
 
             # Debug data value ranges
-            print(f"  📈 Value ranges:")
+            print(f"  📈 Value ranges (BEFORE denormalization):")
             print(f"    Low-res T range: [{low_res[0,0,:,:,0].min().item():.3f}, {low_res[0,0,:,:,0].max().item():.3f}]")
             print(f"    Target T range: [{targets[0,:,0].min().item():.3f}, {targets[0,:,0].max().item():.3f}]")
+            print(f"    Low-res T mean/std: {low_res[0,0,:,:,0].mean().item():.3f}/{low_res[0,0,:,:,0].std().item():.3f}")
+            print(f"    Target T mean/std: {targets[0,:,0].mean().item():.3f}/{targets[0,:,0].std().item():.3f}")
 
             # Get predictions (these will be normalized)
             predictions = model(low_res, coords)
@@ -156,6 +158,22 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
             # Use denormalized data for visualization (on CPU)
             predictions = predictions_denorm
             targets = targets_denorm
+
+            # Debug denormalized data ranges
+            print(f"  📈 Value ranges (AFTER denormalization):")
+            print(f"    Target T range: [{targets[0,:,0].min().item():.3f}, {targets[0,:,0].max().item():.3f}]")
+            print(f"    Target T mean/std: {targets[0,:,0].mean().item():.3f}/{targets[0,:,0].std().item():.3f}")
+            print(f"    Prediction T range: [{predictions[0,:,0].min().item():.3f}, {predictions[0,:,0].max().item():.3f}]")
+            print(f"    Prediction T mean/std: {predictions[0,:,0].mean().item():.3f}/{predictions[0,:,0].std().item():.3f}")
+
+            # Check if denormalization worked correctly
+            if data_module.normalizer is not None:
+                norm_stats = data_module.normalizer
+                print(f"  📊 Normalizer stats:")
+                print(f"    Mean: {norm_stats.mean}")
+                print(f"    Std: {norm_stats.std}")
+            else:
+                print(f"  ⚠️  No normalizer found!")
 
             # Reshape for visualization
             B, N, C = predictions.shape
@@ -355,14 +373,39 @@ def main():
     truth_var = results['truth_fields'][:, :, :, var_idx]
     pred_var = results['predictions'][:, :, :, var_idx]
     
-    print(f"Data shapes:")
+    print(f"Final visualization data shapes:")
     print(f"  Input: {input_var.shape}")
     print(f"  Truth: {truth_var.shape}")
     print(f"  Predictions: {pred_var.shape}")
+
+    print(f"Final visualization data ranges:")
+    print(f"  Input T range: [{input_var.min():.3f}, {input_var.max():.3f}] mean: {input_var.mean():.3f}")
+    print(f"  Truth T range: [{truth_var.min():.3f}, {truth_var.max():.3f}] mean: {truth_var.mean():.3f}")
+    print(f"  Pred T range: [{pred_var.min():.3f}, {pred_var.max():.3f}] mean: {pred_var.mean():.3f}")
+
+    # Check for potential issues
+    if abs(truth_var.mean()) < 0.1 and truth_var.std() < 0.1:
+        print(f"  ⚠️  WARNING: Truth data seems to have very small values!")
+        print(f"  Truth std: {truth_var.std():.3f}")
+
+    if input_var.max() - input_var.min() > truth_var.max() - truth_var.min():
+        print(f"  ⚠️  WARNING: Input has larger range than Truth - this is unusual!")
     
-    # Set color limits based on variable
+    # Set color limits based on actual data range
+    all_data = np.concatenate([truth_var.flatten(), pred_var.flatten()])
+    data_min, data_max = all_data.min(), all_data.max()
+    data_range = data_max - data_min
+
+    print(f"Actual data range: [{data_min:.3f}, {data_max:.3f}], span: {data_range:.3f}")
+
+    # Use adaptive color limits or defaults
     if args.variable == 'T':
-        vmin, vmax = -0.5, 0.5
+        if data_range > 0.1:  # Use actual range if significant
+            vmin, vmax = data_min - 0.1 * data_range, data_max + 0.1 * data_range
+            print(f"Using adaptive color range: [{vmin:.3f}, {vmax:.3f}]")
+        else:
+            vmin, vmax = -0.5, 0.5
+            print(f"Using default color range: [{vmin:.3f}, {vmax:.3f}]")
     elif args.variable in ['u', 'v']:
         vmin, vmax = -0.4, 0.4
     else:  # pressure
