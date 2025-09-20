@@ -218,23 +218,22 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
                         t_field_range = predictions_denorm_test[0,:,0].max() - predictions_denorm_test[0,:,0].min()
                         t_field_std = predictions_denorm_test[0,:,0].std()
 
-                        print(f"  🔧 Denormalization test: range={denorm_range:.8f}, std={denorm_std:.8f}")
-                        print(f"  🔧 Raw predictions: range={pred_range:.8f}, std={predictions_cpu.std():.8f}")
-                        print(f"  🔧 Test predictions T field: [{predictions_denorm_test[0,:,0].min():.6f}, {predictions_denorm_test[0,:,0].max():.6f}]")
-                        print(f"  🔧 T field range: {t_field_range:.8f}, std: {t_field_std:.8f}")
+                        print(f"  🔧 T field after denorm: range={t_field_range:.8f}")
 
                         # Check if T field specifically has insufficient variation
                         if t_field_range < 1e-4 or t_field_std < 1e-4:
-                            print(f"  ⚠️ WARNING: Denormalization destroyed variation!")
-                            print(f"  Problem: normalizer stats don't match training data")
-                            print(f"  Solution: using scaled raw predictions for visualization")
-                            # Use scaled raw predictions that preserve variation
-                            predictions_denorm = predictions_cpu * 0.3 + 0.5  # Scale to [0.2, 0.8] range
-                            targets_denorm = targets_denorm_test  # Use properly denormalized targets
+                            print(f"  ⚠️ T field has no variation! Using raw predictions")
+                            predictions_denorm = predictions_cpu * 0.3 + 0.5
+                            targets_denorm = targets_denorm_test
                         else:
-                            print(f"  ✅ Denormalization preserved variation - using denormalized predictions")
+                            print(f"  ✅ Using denormalized predictions")
                             predictions_denorm = predictions_denorm_test
                             targets_denorm = targets_denorm_test
+
+                        # 🔍 DEBUG: Check final CDAnet predictions before visualization
+                        print(f"  🎯 Final CDAnet predictions for visualization:")
+                        print(f"    T field: [{predictions_denorm[0,:,0].min():.6f}, {predictions_denorm[0,:,0].max():.6f}] std={predictions_denorm[0,:,0].std():.6f}")
+                        print(f"    All fields: [{predictions_denorm.min():.6f}, {predictions_denorm.max():.6f}] std={predictions_denorm.std():.6f}")
 
                     except Exception as e:
                         print(f"  ⚠️ WARNING: Denormalization failed ({e})")
