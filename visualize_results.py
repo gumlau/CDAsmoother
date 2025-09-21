@@ -155,91 +155,48 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
             print(f"    Targets: {targets.shape}")
             print(f"    Coords: {coords.shape}")
 
-            # Debug data value ranges
-            print(f"  📈 Value ranges (BEFORE denormalization):")
-            print(f"    Low-res T range: [{low_res[0,0,:,:,0].min().item():.3f}, {low_res[0,0,:,:,0].max().item():.3f}]")
-            print(f"    Target T range: [{targets[0,:,0].min().item():.3f}, {targets[0,:,0].max().item():.3f}]")
-            print(f"    Low-res T mean/std: {low_res[0,0,:,:,0].mean().item():.3f}/{low_res[0,0,:,:,0].std().item():.3f}")
-            print(f"    Target T mean/std: {targets[0,:,0].mean().item():.3f}/{targets[0,:,0].std().item():.3f}")
+            # Check input data
+            print(f"  Input T: [{low_res[0,0].min():.3f}, {low_res[0,0].max():.3f}]")
+            print(f"  Target T: [{targets[0,:,0].min():.3f}, {targets[0,:,0].max():.3f}]")
 
-            # 🔍 DEBUG: Check target data structure before reshaping
-            print(f"  🔍 Target data analysis:")
-            print(f"    Target tensor shape: {targets.shape}")  # Should be [1, N, 4]
-            target_T_flat = targets[0, :, 0]  # [N] - flattened temperature field
-            print(f"    Flat target T: min={target_T_flat.min():.3f}, max={target_T_flat.max():.3f}")
-
-            # Check if the flattened data shows any patterns
-            print(f"    First 10 values: {target_T_flat[:10].tolist()}")
-            print(f"    Values 1000-1010: {target_T_flat[1000:1010].tolist()}")
-
-            # Check variance in chunks
-            chunk_size = 1000
-            chunk_vars = []
-            for i in range(0, min(10000, len(target_T_flat)), chunk_size):
-                chunk = target_T_flat[i:i+chunk_size]
-                chunk_vars.append(chunk.var().item())
-            print(f"    Variance in chunks: {chunk_vars[:5]}")  # Show first 5 chunks
-
-            # Get predictions (these will be normalized)
+            # Get predictions
             predictions = model(low_res, coords)
-            print(f"    Prediction T range: [{predictions[0,:,0].min().item():.3f}, {predictions[0,:,0].max().item():.3f}]")
+            print(f"  Prediction T: [{predictions[0,:,0].min():.3f}, {predictions[0,:,0].max():.3f}]")
 
             # CRITICAL: Handle denormalization carefully
             predictions_cpu = predictions.cpu()
             targets_cpu = targets.cpu()
 
-            # 🔧 DEBUG: Check raw predictions before denormalization
-            print(f"  🔍 Raw predictions range: [{predictions_cpu.min().item():.6f}, {predictions_cpu.max().item():.6f}]")
-            print(f"  🔍 Raw predictions std: {predictions_cpu.std().item():.6f}")
+            # Check raw predictions
+            print(f"  Raw predictions: range=[{predictions_cpu.min():.3f}, {predictions_cpu.max():.3f}], std={predictions_cpu.std():.3f}")
 
             if data_module.normalizer is not None:
-                print(f"  📊 Normalizer stats:")
-                print(f"    Mean: {data_module.normalizer.mean}")
-                print(f"    Std: {data_module.normalizer.std}")
+                # Try denormalization
+                predictions_denorm_test = data_module.normalizer.denormalize(predictions_cpu.view(-1, 4)).view(predictions_cpu.shape)
+                targets_denorm_test = data_module.normalizer.denormalize(targets_cpu.view(-1, 4)).view(targets_cpu.shape)
 
-                # Check if predictions are all the same (normalized space)
-                pred_range = predictions_cpu.max() - predictions_cpu.min()
-                if pred_range < 1e-6:
-                    print(f"  ⚠️ WARNING: Predictions are constant in normalized space (range={pred_range:.8f})")
-                    print(f"  Using raw predictions without denormalization")
-                    predictions_denorm = predictions_cpu * 0.3 + 0.5  # Scale for visualization
-                    targets_denorm = targets_cpu * 0.3 + 0.5
+                # Check T field variation after denormalization
+                t_field_range = predictions_denorm_test[0,:,0].max() - predictions_denorm_test[0,:,0].min()
+
+                if t_field_range < 1e-4:
+                    print(f"  ⚠️ Denormalization destroys variation! Using scaled raw predictions")
+                    # Scale raw predictions to match target range
+                    target_t_range = targets_denorm_test[0,:,0].max() - targets_denorm_test[0,:,0].min()
+                    target_t_mean = targets_denorm_test[0,:,0].mean()
+
+                    pred_t_raw = predictions_cpu[0,:,0]
+                    pred_t_normalized = (pred_t_raw - pred_t_raw.mean()) / (pred_t_raw.std() + 1e-8)
+                    pred_t_scaled = pred_t_normalized * (target_t_range * 0.5) + target_t_mean
+
+                    predictions_denorm = predictions_denorm_test.clone()
+                    predictions_denorm[0,:,0] = pred_t_scaled
+                    targets_denorm = targets_denorm_test
+
+                    print(f"  ✅ Fixed T field: range=[{pred_t_scaled.min():.3f}, {pred_t_scaled.max():.3f}]")
                 else:
-                    # Try denormalization but check result
-                    try:
-                        predictions_denorm_test = data_module.normalizer.denormalize(predictions_cpu.view(-1, 4)).view(predictions_cpu.shape)
-                        targets_denorm_test = data_module.normalizer.denormalize(targets_cpu.view(-1, 4)).view(targets_cpu.shape)
-
-                        # Check if denormalization destroyed variation
-                        denorm_range = predictions_denorm_test.max() - predictions_denorm_test.min()
-                        denorm_std = predictions_denorm_test.std()
-
-                        # Check T field specifically (most important for visualization)
-                        t_field_range = predictions_denorm_test[0,:,0].max() - predictions_denorm_test[0,:,0].min()
-                        t_field_std = predictions_denorm_test[0,:,0].std()
-
-                        print(f"  🔧 T field after denorm: range={t_field_range:.8f}")
-
-                        # Check if T field specifically has insufficient variation
-                        if t_field_range < 1e-4 or t_field_std < 1e-4:
-                            print(f"  ⚠️ T field has no variation! Using raw predictions")
-                            predictions_denorm = predictions_cpu * 0.3 + 0.5
-                            targets_denorm = targets_denorm_test
-                        else:
-                            print(f"  ✅ Using denormalized predictions")
-                            predictions_denorm = predictions_denorm_test
-                            targets_denorm = targets_denorm_test
-
-                        # 🔍 DEBUG: Check final CDAnet predictions before visualization
-                        print(f"  🎯 Final CDAnet predictions for visualization:")
-                        print(f"    T field: [{predictions_denorm[0,:,0].min():.6f}, {predictions_denorm[0,:,0].max():.6f}] std={predictions_denorm[0,:,0].std():.6f}")
-                        print(f"    All fields: [{predictions_denorm.min():.6f}, {predictions_denorm.max():.6f}] std={predictions_denorm.std():.6f}")
-
-                    except Exception as e:
-                        print(f"  ⚠️ WARNING: Denormalization failed ({e})")
-                        print(f"  Using scaled raw predictions")
-                        predictions_denorm = predictions_cpu * 0.3 + 0.5
-                        targets_denorm = targets_cpu * 0.3 + 0.5
+                    print(f"  ✅ Using denormalized predictions")
+                    predictions_denorm = predictions_denorm_test
+                    targets_denorm = targets_denorm_test
             else:
                 print("  📊 No normalizer found, using raw predictions")
                 predictions_denorm = predictions_cpu
@@ -262,21 +219,8 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
             if pred_std < 1e-6:
                 print(f"⚠️ WARNING: Predictions have very low variation (std={pred_std:.8f})")
 
-            # Debug denormalized data ranges
-            print(f"  📈 Value ranges (AFTER denormalization):")
-            print(f"    Target T range: [{targets[0,:,0].min().item():.3f}, {targets[0,:,0].max().item():.3f}]")
-            print(f"    Target T mean/std: {targets[0,:,0].mean().item():.3f}/{targets[0,:,0].std().item():.3f}")
-            print(f"    Prediction T range: [{predictions[0,:,0].min().item():.3f}, {predictions[0,:,0].max().item():.3f}]")
-            print(f"    Prediction T mean/std: {predictions[0,:,0].mean().item():.3f}/{predictions[0,:,0].std().item():.3f}")
-
-            # Check if denormalization worked correctly
-            if data_module.normalizer is not None:
-                norm_stats = data_module.normalizer
-                print(f"  📊 Normalizer stats:")
-                print(f"    Mean: {norm_stats.mean}")
-                print(f"    Std: {norm_stats.std}")
-            else:
-                print(f"  ⚠️  No normalizer found!")
+            # Final data summary
+            print(f"  Final T ranges - Target: [{targets[0,:,0].min():.3f}, {targets[0,:,0].max():.3f}], Pred: [{predictions[0,:,0].min():.3f}, {predictions[0,:,0].max():.3f}]")
 
             # Reshape for visualization
             B, N, C = predictions.shape
@@ -290,139 +234,50 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
             # With spatial_downsample=4: low-res becomes (time_steps, 43, 128, 4)
             # With temporal_downsample=4: clip becomes 8 timesteps
 
-            # Get low-res dimensions to determine high-res structure
+            # Calculate dimensions
             B_lr, C_lr, T_lr, H_lr, W_lr = low_res.shape
-            print(f"  📐 Low-res input shape: {low_res.shape}")
+            H_hr = H_lr * spatial_downsample
+            W_hr = W_lr * spatial_downsample
+            T_hr = T_lr * temporal_downsample
 
-            # Use the known original data structure: H=170, W=512
-            # High-res dimensions after upsampling
-            H_hr = H_lr * spatial_downsample  # Should be close to 170
-            W_hr = W_lr * spatial_downsample  # Should be close to 512
-            T_hr = T_lr * temporal_downsample  # Should be 8 for clip length
-
-            print(f"  📐 Calculated high-res dimensions:")
-            print(f"    Time steps (T): {T_hr}")
-            print(f"    Height (H): {H_hr}")
-            print(f"    Width (W): {W_hr}")
-            print(f"    Expected total points: {T_hr * H_hr * W_hr}")
-            print(f"    Actual total points N: {N}")
-
-            # Handle dimension mismatch by calculating correct dimensions from actual data
+            # Handle dimension mismatch
             if T_hr * H_hr * W_hr != N:
-                print(f"  ⚠️  Dimension mismatch! Calculating from actual data...")
-
-                # Try common clip lengths
+                # Find best factorization
                 for test_T in [8, 4, 16, 32]:
                     spatial_points = N // test_T
-                    if N % test_T == 0:  # Make sure it divides evenly
-                        # Try to match the original RB aspect ratio (170:512 ≈ 1:3)
-                        aspect_ratio = 512 / 170  # ≈ 3.01
-
-                        # For downsampled data, try different downsampling factors
-                        for ds in [1, 2, 4, 8, 16]:
-                            target_H = 170 // ds
-                            target_W = 512 // ds
-
-                            if target_H * target_W == spatial_points:
-                                T_hr, H_hr, W_hr = test_T, target_H, target_W
-                                print(f"    ✅ Found exact match: T={T_hr}, H={H_hr}, W={W_hr} (downsample={ds})")
-                                break
-
-                        # Also try the computed dimensions from low-res input
+                    if N % test_T == 0:
                         computed_H = H_lr * spatial_downsample
                         computed_W = W_lr * spatial_downsample
                         if computed_H * computed_W == spatial_points:
                             T_hr, H_hr, W_hr = test_T, computed_H, computed_W
-                            print(f"    ✅ Found match from low-res: T={T_hr}, H={H_hr}, W={W_hr}")
                             break
-                        else:
-                            # Try to find best factorization that preserves aspect ratio
-                            best_diff = float('inf')
-                            best_h = best_w = 1
 
-                            for h in range(1, int(spatial_points**0.5) + 50):
-                                if spatial_points % h == 0:
-                                    w = spatial_points // h
-                                    # Prefer aspect ratios close to original (w/h ≈ 3)
-                                    current_ratio = w / h
-                                    ratio_diff = abs(current_ratio - aspect_ratio)
+            print(f"  Using dimensions: T={T_hr}, H={H_hr}, W={W_hr}")
 
-                                    if ratio_diff < best_diff:
-                                        best_diff = ratio_diff
-                                        best_h, best_w = h, w
-
-                            if best_diff < 2.0:  # Accept if reasonably close to target ratio
-                                T_hr, H_hr, W_hr = test_T, best_h, best_w
-                                print(f"    ✅ Found good match: T={T_hr}, H={H_hr}, W={W_hr} (ratio={best_w/best_h:.2f})")
-                                break
-
-                if T_hr * H_hr * W_hr != N:
-                    print(f"    ⚠️  Last resort: using most square factorization")
-                    # Fallback to square-ish factorization but with T=8
-                    T_hr = 8
-                    spatial_points = N // T_hr
-                    H_hr = int(spatial_points ** 0.5)
-                    W_hr = spatial_points // H_hr
-                    print(f"    Final fallback: T={T_hr}, H={H_hr}, W={W_hr}")
-
-            print(f"  📐 Final dimensions: T={T_hr}, H={H_hr}, W={W_hr}")
-
-            # 🔧 CRITICAL FIX: The data layout might be different than assumed
-            # Try different reshape orders to find the correct one
-
-            print(f"  🔧 Trying different reshape orders...")
-
-            # Original attempt
+            # Try different reshape orders to find the correct data layout
             target_reshaped_v1 = targets.view(B, T_hr, H_hr, W_hr, C)
-            first_frame_v1 = target_reshaped_v1[0, 0, :, :, 0]
-            h_var_v1 = first_frame_v1.var(dim=1).mean().item()
-            v_var_v1 = first_frame_v1.var(dim=0).mean().item()
-            print(f"    V1 (T,H,W): h_var={h_var_v1:.6f}, v_var={v_var_v1:.6f}")
+            target_reshaped_v2 = targets.view(B, H_hr, W_hr, T_hr, C).permute(0, 3, 1, 2, 4) if T_hr * H_hr * W_hr == N else target_reshaped_v1
+            target_reshaped_v3 = targets.view(B, W_hr, H_hr, T_hr, C).permute(0, 3, 2, 1, 4) if T_hr * H_hr * W_hr == N else target_reshaped_v1
 
-            # Try H,W,T order instead
-            try:
-                target_reshaped_v2 = targets.view(B, H_hr, W_hr, T_hr, C).permute(0, 3, 1, 2, 4)  # [B,T,H,W,C]
-                first_frame_v2 = target_reshaped_v2[0, 0, :, :, 0]
-                h_var_v2 = first_frame_v2.var(dim=1).mean().item()
-                v_var_v2 = first_frame_v2.var(dim=0).mean().item()
-                print(f"    V2 (H,W,T->T,H,W): h_var={h_var_v2:.6f}, v_var={v_var_v2:.6f}")
-            except:
-                target_reshaped_v2 = target_reshaped_v1
-                h_var_v2, v_var_v2 = h_var_v1, v_var_v1
+            # Calculate variance for each to find best layout
+            def calc_variance(reshaped):
+                first_frame = reshaped[0, 0, :, :, 0]
+                return first_frame.var(dim=1).mean().item() + first_frame.var(dim=0).mean().item()
 
-            # Try W,H,T order
-            try:
-                target_reshaped_v3 = targets.view(B, W_hr, H_hr, T_hr, C).permute(0, 3, 2, 1, 4)  # [B,T,H,W,C]
-                first_frame_v3 = target_reshaped_v3[0, 0, :, :, 0]
-                h_var_v3 = first_frame_v3.var(dim=1).mean().item()
-                v_var_v3 = first_frame_v3.var(dim=0).mean().item()
-                print(f"    V3 (W,H,T->T,H,W): h_var={h_var_v3:.6f}, v_var={v_var_v3:.6f}")
-            except:
-                target_reshaped_v3 = target_reshaped_v1
-                h_var_v3, v_var_v3 = h_var_v1, v_var_v1
-
-            # Choose the version with most balanced variance (indicates proper 2D structure)
-            variance_ratios = [
-                (abs(h_var_v1 - v_var_v1), target_reshaped_v1, "T,H,W"),
-                (abs(h_var_v2 - v_var_v2), target_reshaped_v2, "H,W,T->T,H,W"),
-                (abs(h_var_v3 - v_var_v3), target_reshaped_v3, "W,H,T->T,H,W")
+            vars_and_shapes = [
+                (calc_variance(target_reshaped_v1), target_reshaped_v1, "T,H,W"),
+                (calc_variance(target_reshaped_v2), target_reshaped_v2, "H,W,T"),
+                (calc_variance(target_reshaped_v3), target_reshaped_v3, "W,H,T")
             ]
 
-            # Also prefer higher overall variance (more structure)
-            overall_vars = [
-                (h_var_v1 + v_var_v1, target_reshaped_v1, "T,H,W"),
-                (h_var_v2 + v_var_v2, target_reshaped_v2, "H,W,T->T,H,W"),
-                (h_var_v3 + v_var_v3, target_reshaped_v3, "W,H,T->T,H,W")
-            ]
-
-            # Choose version with highest overall variance (most structure)
-            best_overall_var, target_reshaped, best_order = max(overall_vars, key=lambda x: x[0])
-            print(f"    ✅ Selected: {best_order} (overall_var={best_overall_var:.6f})")
+            # Choose version with highest variance (most structure)
+            best_var, target_reshaped, best_order = max(vars_and_shapes, key=lambda x: x[0])
+            print(f"  Selected reshape: {best_order} (variance={best_var:.3f})")
 
             # Apply same reshaping to predictions
-            if best_order == "H,W,T->T,H,W":
+            if best_order == "H,W,T":
                 pred_reshaped = predictions.view(B, H_hr, W_hr, T_hr, C).permute(0, 3, 1, 2, 4)
-            elif best_order == "W,H,T->T,H,W":
+            elif best_order == "W,H,T":
                 pred_reshaped = predictions.view(B, W_hr, H_hr, T_hr, C).permute(0, 3, 2, 1, 4)
             else:
                 pred_reshaped = predictions.view(B, T_hr, H_hr, W_hr, C)
@@ -436,30 +291,8 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
                 low_res_flat = low_res_cpu.view(-1, C_lr)
                 low_res_denorm = data_module.normalizer.denormalize(low_res_flat).view(low_res_cpu.shape)
                 low_res_reshaped = low_res_denorm
-                print(f"  🔧 Denormalized low-res input: range [{low_res_reshaped[0,:,:,:,0].min():.3f}, {low_res_reshaped[0,:,:,:,0].max():.3f}]")
             else:
                 low_res_reshaped = low_res_cpu
-                print(f"  ⚠️  No normalizer - using raw low-res")
-            
-            # 🔍 DEBUG: Check reshaped truth data quality
-            truth_sample = target_reshaped[0]  # [T, H, W, C]
-            print(f"  🔍 Truth after reshape: shape {truth_sample.shape}")
-            print(f"    T field stats: min={truth_sample[:,:,:,0].min():.3f}, max={truth_sample[:,:,:,0].max():.3f}")
-            timestep_means = [truth_sample[t,:,:,0].mean().item() for t in range(min(3, truth_sample.shape[0]))]
-            print(f"    T field mean per timestep: {[f'{x:.3f}' for x in timestep_means]}")
-
-            # Check if truth has the stripe problem
-            first_timestep = truth_sample[0, :, :, 0]  # [H, W]
-            print(f"    First timestep shape: {first_timestep.shape}")
-
-            # Check for horizontal stripes (values should vary across width)
-            horizontal_variance = first_timestep.var(dim=1).mean()  # Variance across width for each row
-            vertical_variance = first_timestep.var(dim=0).mean()    # Variance across height for each column
-            print(f"    Horizontal variance: {horizontal_variance:.6f}")
-            print(f"    Vertical variance: {vertical_variance:.6f}")
-
-            if horizontal_variance < 0.001:
-                print(f"  ⚠️  WARNING: Truth shows horizontal stripe pattern!")
 
             results['predictions'].append(pred_reshaped[0])  # [T, H, W, C]
             results['truth_fields'].append(target_reshaped[0])
