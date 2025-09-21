@@ -25,15 +25,15 @@ def main():
     config.experiment_name = f"cdanet_better_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     config.description = "改进的训练配置，更多数据和更好参数"
 
-    # 数据配置 - 减少downsampling增加数据量
+    # 数据配置 - 平衡数据量和内存使用
     config.data.data_dir = os.path.abspath('./rb_data_numerical')
-    config.data.spatial_downsample = 2  # 从4减少到2，增加4倍空间数据
-    config.data.temporal_downsample = 2  # 从4减少到2，增加4倍时间数据
-    config.data.clip_length = 16  # 增加clip长度
+    config.data.spatial_downsample = 4  # 保持原来的4，节省内存
+    config.data.temporal_downsample = 3  # 稍微减少，增加一些时间数据
+    config.data.clip_length = 8  # 较小的clip长度节省内存
     config.data.Ra_numbers = [1e5]
     config.data.batch_size = 1  # 减小batch size，更多步数
     config.data.num_workers = 0
-    config.data.pde_points = 4096  # 增加PDE点
+    config.data.pde_points = 2048  # 减少PDE点节省内存
     config.data.normalize = True
 
     # 模型配置 - 和checkpoint匹配
@@ -92,17 +92,18 @@ def main():
         os.remove(data_file)
         print("  删除旧数据文件")
 
-    # 使用改进的RB simulation生成更多真实数据
-    print("🔄 运行改进的RB simulation...")
+    # 使用合理参数的RB simulation
+    print("🔄 运行RB simulation (合理参数)...")
     import subprocess
     result = subprocess.run([
         'python3', 'rb_simulation.py',
         '--Ra', '1e5',
-        '--n_runs', '20',  # 20个runs
-        '--nx', '512',     # 更高分辨率
-        '--ny', '128',
-        '--nt', '3000'     # 更多时间步
-    ], capture_output=True, text=True, cwd='.')
+        '--n_runs', '10',  # 10个runs就够了
+        '--nx', '256',     # 中等分辨率，避免卡住
+        '--ny', '64',
+        '--nt', '1500',    # 适中的时间步
+        '--fast'           # 使用fast mode
+    ], capture_output=True, text=True, cwd='.', timeout=300)  # 5分钟超时
 
     if result.returncode == 0:
         print("✅ RB simulation完成")
