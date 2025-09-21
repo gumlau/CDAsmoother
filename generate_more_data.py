@@ -17,6 +17,14 @@ def generate_large_dataset():
     data_dir = './rb_data_numerical'
     os.makedirs(data_dir, exist_ok=True)
 
+    # 删除所有现有的数据文件防止覆盖问题
+    print("🗑️  清理旧数据文件...")
+    for file in os.listdir(data_dir):
+        if file.endswith('.h5'):
+            old_file_path = os.path.join(data_dir, file)
+            print(f"  删除: {file}")
+            os.remove(old_file_path)
+
     # 创建数据模块
     data_module = RBDataModule(
         data_dir=data_dir,
@@ -27,14 +35,14 @@ def generate_large_dataset():
         normalize=True
     )
 
-    # 生成一个合适大小的数据集来替换现有的小数据集
+    # 生成更多数据的数据集
     datasets = [
         {
             'name': 'rb_data_Ra_1e+05.h5',  # 替换现有文件
-            'nx': 384,   # 原来768的1/2
-            'ny': 96,    # 原来192的1/2
-            'nt': 2000,  # 原来8000的1/4
-            'description': '合适大小的数据集'
+            'nx': 384,   # 保持分辨率
+            'ny': 96,
+            'nt': 5000,  # 增加到5000时间步，产生更多clips
+            'description': '更多训练数据的数据集'
         }
     ]
 
@@ -43,9 +51,7 @@ def generate_large_dataset():
     for i, dataset in enumerate(datasets):
         output_path = os.path.join(data_dir, dataset['name'])
 
-        if os.path.exists(output_path):
-            print(f"🔄 删除旧文件: {dataset['name']}")
-            os.remove(output_path)  # 强制重新生成
+        # 文件已经在上面清理过了，直接生成
 
         print(f"🔄 生成数据集 {i+1}/{len(datasets)}: {dataset['description']}")
         print(f"   分辨率: {dataset['nx']}x{dataset['ny']}")
