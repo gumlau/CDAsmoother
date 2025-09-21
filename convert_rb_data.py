@@ -47,6 +47,7 @@ def convert_rb_data_to_cdanet_format(data_dir='rb_data_numerical', Ra=1e5):
                 if 'data' in f:
                     sample_shape = f['data'].shape[1:]  # (ny, nx, 4)
                     is_optimized = True
+                    print(f"  Detected optimized format with shape: {sample_shape}")
                 else:
                     # Old format with individual frame groups
                     frame_grp = f['frame_000']
@@ -79,7 +80,22 @@ def convert_rb_data_to_cdanet_format(data_dir='rb_data_numerical', Ra=1e5):
             end_idx = sample_idx + n_frames
             
             if is_file_optimized:
-                # New optimized format - direct copy
+                # New optimized format - direct copy with shape validation
+                file_data_shape = f['data'].shape
+                expected_shape = (n_frames,) + sample_shape
+
+                if file_data_shape != expected_shape:
+                    print(f"    Warning: Shape mismatch! File: {file_data_shape}, Expected: {expected_shape}")
+                    # 如果形状不匹配，需要重新构建sample_shape
+                    sample_shape = file_data_shape[1:]
+                    print(f"    Updating sample_shape to: {sample_shape}")
+
+                    # 重新创建consolidated_data数组
+                    if i == 0:  # 只在第一个文件时重新创建
+                        print(f"    Recreating consolidated_data with corrected shape")
+                        del consolidated_data  # 删除旧数组
+                        consolidated_data = np.zeros((total_samples,) + sample_shape, dtype=np.float32)
+
                 consolidated_data[sample_idx:end_idx] = f['data'][:]
             else:
                 # Old format - need to reconstruct
