@@ -107,12 +107,15 @@ def main():
 
     if result.returncode == 0:
         print("✅ RB simulation完成")
-        # 转换数据
+        # 强制转换数据
+        print("🔄 强制运行数据转换...")
         conv_result = subprocess.run(['python3', 'convert_rb_data.py'], capture_output=True, text=True)
         if conv_result.returncode == 0:
             print("✅ 数据转换完成")
         else:
-            print("⚠️  数据转换有问题，但继续训练")
+            print(f"❌ 数据转换失败: {conv_result.stderr}")
+            print("程序终止")
+            return
     else:
         print(f"❌ RB simulation失败: {result.stderr}")
         print("程序终止")
@@ -142,7 +145,15 @@ def main():
     for key, info in data_info.items():
         print(f"  {key}: {info['num_samples']} samples")
 
-    if total_samples < 100:
+    if total_samples == 0:
+        print("❌ 没有有效的训练数据!")
+        print("可能的原因:")
+        print("  1. 数据转换失败")
+        print("  2. clip_length太大，时间步不够")
+        print("  3. 数据文件格式问题")
+        print("程序终止")
+        return
+    elif total_samples < 100:
         print("⚠️  样本数仍然太少，训练可能很快完成")
 
     # 创建模型
