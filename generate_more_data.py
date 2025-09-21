@@ -35,14 +35,14 @@ def generate_large_dataset():
         normalize=True
     )
 
-    # 生成更多数据的数据集
+    # 生成大量数据的数据集
     datasets = [
         {
             'name': 'rb_data_Ra_1e+05.h5',  # 替换现有文件
-            'nx': 384,   # 保持分辨率
-            'ny': 96,
-            'nt': 5000,  # 增加到5000时间步，产生更多clips
-            'description': '更多训练数据的数据集'
+            'nx': 512,   # 稍微增加分辨率
+            'ny': 128,
+            'nt': 8000,  # 大幅增加到8000时间步
+            'description': '大量训练数据的数据集'
         }
     ]
 
