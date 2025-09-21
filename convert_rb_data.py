@@ -62,10 +62,9 @@ def convert_rb_data_to_cdanet_format(data_dir='rb_data_numerical', Ra=1e5):
             })
     
     print(f"Total samples across all files: {total_samples}")
-    
-    # Pre-allocate output array
-    print(f"Pre-allocating array for {total_samples} samples...")
-    consolidated_data = np.zeros((total_samples,) + sample_shape, dtype=np.float32)
+
+    # 延迟分配output array，先检查第一个文件的实际形状
+    consolidated_data = None
     
     # Load data efficiently
     sample_idx = 0
@@ -80,25 +79,22 @@ def convert_rb_data_to_cdanet_format(data_dir='rb_data_numerical', Ra=1e5):
             end_idx = sample_idx + n_frames
             
             if is_file_optimized:
-                # New optimized format - direct copy with shape validation
-                file_data_shape = f['data'].shape
-                expected_shape = (n_frames,) + sample_shape
+                # New optimized format - 首次创建consolidated_data数组
+                if consolidated_data is None:
+                    # 使用第一个文件的实际形状来创建数组
+                    actual_shape = f['data'].shape[1:]  # 获取实际的样本形状
+                    print(f"    Using actual shape from first file: {actual_shape}")
+                    consolidated_data = np.zeros((total_samples,) + actual_shape, dtype=np.float32)
 
-                if file_data_shape != expected_shape:
-                    print(f"    Warning: Shape mismatch! File: {file_data_shape}, Expected: {expected_shape}")
-                    # 如果形状不匹配，需要重新构建sample_shape
-                    sample_shape = file_data_shape[1:]
-                    print(f"    Updating sample_shape to: {sample_shape}")
-
-                    # 重新创建consolidated_data数组
-                    if i == 0:  # 只在第一个文件时重新创建
-                        print(f"    Recreating consolidated_data with corrected shape")
-                        del consolidated_data  # 删除旧数组
-                        consolidated_data = np.zeros((total_samples,) + sample_shape, dtype=np.float32)
-
+                # 直接复制数据
                 consolidated_data[sample_idx:end_idx] = f['data'][:]
             else:
                 # Old format - need to reconstruct
+                if consolidated_data is None:
+                    # 创建数组为old format
+                    print(f"    Using sample_shape for old format: {sample_shape}")
+                    consolidated_data = np.zeros((total_samples,) + sample_shape, dtype=np.float32)
+
                 for frame_idx in range(n_frames):
                     frame_grp = f[f'frame_{frame_idx:03d}']
                     
