@@ -84,16 +84,37 @@ def main():
     print(f"PDE权重: {config.loss.lambda_pde}")
     print(f"设备: {config.training.device}")
 
-    # 检查数据文件大小
+    # 强制重新生成干净的数据
+    print("🗑️  删除有问题的旧数据，重新生成...")
+
     data_file = os.path.join(config.data.data_dir, f'rb_data_Ra_{config.data.Ra_numbers[0]:.0e}.h5')
     if os.path.exists(data_file):
-        file_size = os.path.getsize(data_file) / 1024 / 1024
-        print(f"数据文件: {file_size:.1f} MB")
+        os.remove(data_file)
+        print("  删除旧数据文件")
 
-        if file_size < 10:
-            print("⚠️  数据文件太小，建议先运行 generate_more_data.py")
+    # 使用改进的RB simulation生成更多真实数据
+    print("🔄 运行改进的RB simulation...")
+    import subprocess
+    result = subprocess.run([
+        'python3', 'rb_simulation.py',
+        '--Ra', '1e5',
+        '--n_runs', '20',  # 20个runs
+        '--nx', '512',     # 更高分辨率
+        '--ny', '128',
+        '--nt', '3000'     # 更多时间步
+    ], capture_output=True, text=True, cwd='.')
+
+    if result.returncode == 0:
+        print("✅ RB simulation完成")
+        # 转换数据
+        conv_result = subprocess.run(['python3', 'convert_rb_data.py'], capture_output=True, text=True)
+        if conv_result.returncode == 0:
+            print("✅ 数据转换完成")
+        else:
+            print("⚠️  数据转换有问题，但继续训练")
     else:
-        print("❌ 数据文件不存在，请先运行 generate_more_data.py")
+        print(f"❌ RB simulation失败: {result.stderr}")
+        print("程序终止")
         return
 
     print("=" * 60)

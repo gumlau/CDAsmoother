@@ -280,8 +280,9 @@ def create_summary_video(Ra, save_path, run_num, total_samples, skip_frames=4):
         print(f"    Error creating animation: {e}")
         return None
 
-def generate_training_dataset(Ra=1e5, n_runs=25, save_path='rb_data_numerical', 
-                            visualize=False, viz_mode='sparse', create_animation=False, fast_mode=False):
+def generate_training_dataset(Ra=1e5, n_runs=50, save_path='rb_data_numerical',
+                            visualize=False, viz_mode='sparse', create_animation=False, fast_mode=False,
+                            nx=512, ny=128, nt=3000):
     """Generate training dataset efficiently with optimizations"""
     
     # Set visualization parameters based on mode
@@ -303,13 +304,19 @@ def generate_training_dataset(Ra=1e5, n_runs=25, save_path='rb_data_numerical',
     if create_animation:
         print(f"  🎬 Animation enabled: creating evolution GIFs")
     
-    # Optimized parameters
-    nx, ny = (384, 128) if fast_mode else (512, 170)  # Reduced from 768x256
-    dt = 1e-3 if fast_mode else 5e-4  # Larger time step for fast mode
-    delta_t = 0.2 if fast_mode else 0.1  # Fewer samples needed
-    
-    startup_time = 10.0 if fast_mode else 25.0  # Shorter startup
-    n_samples = 25 if fast_mode else 100  # Reduced samples
+    # Use provided parameters or optimized defaults
+    if fast_mode:
+        nx, ny = 384, 128
+        n_samples = 25
+        dt = 1e-3
+        delta_t = 0.2
+        startup_time = 10.0
+    else:
+        # Use provided parameters
+        n_samples = min(nt, 200)  # Don't exceed reasonable sample count
+        dt = 5e-4
+        delta_t = 0.1
+        startup_time = 25.0
     startup_steps = int(startup_time / dt)
     steps_per_save = int(delta_t / dt)
     
@@ -455,10 +462,16 @@ if __name__ == "__main__":
                        help='Visualization density: full (every 25 samples), sparse (every 50 samples, skip some runs), minimal (every 100 samples, few runs)')
     parser.add_argument('--animation', action='store_true', 
                        help='Create evolution animations (requires more time/storage)')
-    parser.add_argument('--Ra', type=float, nargs='+', default=[1e5, 1e6, 1e7],
-                       help='Rayleigh numbers to generate (default: 1e5 1e6 1e7)')
-    parser.add_argument('--n_runs', type=int, default=25, 
-                       help='Number of runs per Ra (default: 25)')
+    parser.add_argument('--Ra', type=float, nargs='+', default=[1e5],
+                       help='Rayleigh numbers to generate (default: 1e5)')
+    parser.add_argument('--n_runs', type=int, default=50,
+                       help='Number of runs per Ra (default: 50)')
+    parser.add_argument('--nx', type=int, default=512,
+                       help='Grid points in x direction (default: 512)')
+    parser.add_argument('--ny', type=int, default=128,
+                       help='Grid points in y direction (default: 128)')
+    parser.add_argument('--nt', type=int, default=3000,
+                       help='Number of time steps (default: 3000)')
     parser.add_argument('--save_path', type=str, default='rb_data_numerical',
                        help='Output directory (default: rb_data_numerical)')
     parser.add_argument('--fast', action='store_true', 
@@ -493,10 +506,13 @@ if __name__ == "__main__":
             n_runs = 2 if args.fast else args.n_runs
             
             generate_training_dataset(
-                Ra=Ra, 
-                n_runs=n_runs, 
+                Ra=Ra,
+                n_runs=n_runs,
                 save_path=args.save_path,
                 visualize=args.visualize,
+                nx=args.nx,
+                ny=args.ny,
+                nt=args.nt,
                 viz_mode=args.viz_mode,
                 create_animation=args.animation,
                 fast_mode=args.fast
