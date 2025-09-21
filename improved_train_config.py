@@ -105,8 +105,7 @@ def generate_more_training_data(data_dir: str, Ra: float = 1e5):
                 Ra=Ra,
                 nx=512,   # Higher resolution for more detail
                 ny=128,   # Higher resolution for more detail
-                nt=4000,  # More timesteps = more clips
-                seed=42 + i  # Different seeds for variety
+                nt=4000   # More timesteps = more clips
             )
             data_files.append(synthetic_file)
             print(f"    ✅ Generated: {os.path.basename(synthetic_file)}")
