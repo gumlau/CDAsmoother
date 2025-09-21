@@ -45,8 +45,8 @@ def main():
     config.model.coord_dim = 3
     config.model.output_dim = 4
 
-    # 损失配置
-    config.loss.lambda_pde = 0.001
+    # 损失配置 - 大幅降低PDE权重
+    config.loss.lambda_pde = 0.00001  # 从0.001降到0.00001
     config.loss.regression_norm = 'l2'
     config.loss.pde_norm = 'l2'
     config.loss.Ra = 1e5
@@ -56,7 +56,7 @@ def main():
 
     # 优化器配置
     config.optimizer.optimizer_type = 'adam'
-    config.optimizer.learning_rate = 0.0005  # 保守的学习率
+    config.optimizer.learning_rate = 0.001  # 稍微提高学习率
     config.optimizer.weight_decay = 1e-5
     config.optimizer.grad_clip_max_norm = 1.0
     config.optimizer.scheduler_type = 'plateau'
