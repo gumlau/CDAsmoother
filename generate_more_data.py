@@ -27,14 +27,14 @@ def generate_large_dataset():
         normalize=True
     )
 
-    # 生成一个大型数据集来替换现有的小数据集
+    # 生成一个合适大小的数据集来替换现有的小数据集
     datasets = [
         {
             'name': 'rb_data_Ra_1e+05.h5',  # 替换现有文件
-            'nx': 768,   # 合理的高分辨率
-            'ny': 192,
-            'nt': 8000,  # 大量时间步产生更多clips
-            'description': '高质量大型数据集'
+            'nx': 384,   # 原来768的1/2
+            'ny': 96,    # 原来192的1/2
+            'nt': 2000,  # 原来8000的1/4
+            'description': '合适大小的数据集'
         }
     ]
 
