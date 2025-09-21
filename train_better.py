@@ -25,15 +25,15 @@ def main():
     config.experiment_name = f"cdanet_better_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     config.description = "改进的训练配置，更多数据和更好参数"
 
-    # 数据配置
+    # 数据配置 - 减少downsampling增加数据量
     config.data.data_dir = os.path.abspath('./rb_data_numerical')
-    config.data.spatial_downsample = 4
-    config.data.temporal_downsample = 4
-    config.data.clip_length = 8
+    config.data.spatial_downsample = 2  # 从4减少到2，增加4倍空间数据
+    config.data.temporal_downsample = 2  # 从4减少到2，增加4倍时间数据
+    config.data.clip_length = 16  # 增加clip长度
     config.data.Ra_numbers = [1e5]
-    config.data.batch_size = 4  # 稍大的batch size
+    config.data.batch_size = 1  # 减小batch size，更多步数
     config.data.num_workers = 0
-    config.data.pde_points = 2048
+    config.data.pde_points = 4096  # 增加PDE点
     config.data.normalize = True
 
     # 模型配置 - 和checkpoint匹配
@@ -45,8 +45,8 @@ def main():
     config.model.coord_dim = 3
     config.model.output_dim = 4
 
-    # 损失配置 - 大幅降低PDE权重
-    config.loss.lambda_pde = 0.00001  # 从0.001降到0.00001
+    # 损失配置 - 几乎关闭PDE loss专注数据拟合
+    config.loss.lambda_pde = 0.000001  # 极小的PDE权重
     config.loss.regression_norm = 'l2'
     config.loss.pde_norm = 'l2'
     config.loss.Ra = 1e5
@@ -54,25 +54,24 @@ def main():
     config.loss.Lx = 3.0
     config.loss.Ly = 1.0
 
-    # 优化器配置
+    # 优化器配置 - 更激进的学习
     config.optimizer.optimizer_type = 'adam'
-    config.optimizer.learning_rate = 0.001  # 稍微提高学习率
-    config.optimizer.weight_decay = 1e-5
-    config.optimizer.grad_clip_max_norm = 1.0
-    config.optimizer.scheduler_type = 'plateau'
-    config.optimizer.patience = 30
-    config.optimizer.factor = 0.5
-    config.optimizer.min_lr = 1e-7
+    config.optimizer.learning_rate = 0.005  # 更高的学习率
+    config.optimizer.weight_decay = 1e-6    # 更小的weight decay
+    config.optimizer.grad_clip_max_norm = 2.0  # 放松梯度裁剪
+    config.optimizer.scheduler_type = 'step'   # 使用step scheduler
+    config.optimizer.step_size = 50           # 每50 epochs降低LR
+    config.optimizer.gamma = 0.8               # LR衰减因子
 
-    # 训练配置
-    config.training.num_epochs = 500
+    # 训练配置 - 更仔细的训练
+    config.training.num_epochs = 200  # 减少epochs，关注质量
     config.training.clips_per_epoch = -1
-    config.training.val_interval = 10
-    config.training.checkpoint_interval = 50
+    config.training.val_interval = 5   # 更频繁验证
+    config.training.checkpoint_interval = 25
     config.training.save_best = True
     config.training.early_stopping = True
-    config.training.patience = 100
-    config.training.min_delta = 1e-6
+    config.training.patience = 50      # 减少patience
+    config.training.min_delta = 1e-4   # 更大的min_delta要求真正的改进
     config.training.use_amp = False
     config.training.device = 'cuda' if torch.cuda.is_available() else 'cpu'
     config.training.log_interval = 1
