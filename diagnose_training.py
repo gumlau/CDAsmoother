@@ -24,17 +24,31 @@ def diagnose_model(checkpoint_path):
 
     # 检查配置
     if 'config' in checkpoint:
-        model_config = checkpoint['config']
+        full_config = checkpoint['config']
+        model_config = full_config.get('model', {})
         print(f"📊 模型配置: {model_config}")
+
+        # 提取模型参数
+        model_params = {
+            'in_channels': model_config.get('in_channels', 4),
+            'feature_channels': model_config.get('feature_channels', 128),
+            'base_channels': model_config.get('base_channels', 32),
+            'mlp_hidden_dims': model_config.get('mlp_hidden_dims', [256, 256]),
+            'activation': model_config.get('activation', 'relu'),
+            'coord_dim': model_config.get('coord_dim', 3),
+            'output_dim': model_config.get('output_dim', 4)
+        }
     else:
-        model_config = {
+        model_params = {
             'in_channels': 4, 'feature_channels': 128, 'base_channels': 32,
             'mlp_hidden_dims': [256, 256], 'activation': 'relu',
             'coord_dim': 3, 'output_dim': 4
         }
 
+    print(f"📊 使用模型参数: {model_params}")
+
     # 创建模型
-    model = CDAnet(**model_config)
+    model = CDAnet(**model_params)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
 

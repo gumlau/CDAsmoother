@@ -27,28 +27,14 @@ def generate_large_dataset():
         normalize=True
     )
 
-    # 生成多个大型数据集
+    # 生成一个大型数据集来替换现有的小数据集
     datasets = [
         {
-            'name': 'rb_data_Ra_1e+05_large.h5',
-            'nx': 1024,  # 高分辨率
-            'ny': 256,   # 高分辨率
-            'nt': 8000,  # 大量时间步
-            'description': '高分辨率长时间序列'
-        },
-        {
-            'name': 'rb_data_Ra_1e+05_medium.h5',
-            'nx': 768,
+            'name': 'rb_data_Ra_1e+05.h5',  # 替换现有文件
+            'nx': 768,   # 合理的高分辨率
             'ny': 192,
-            'nt': 6000,
-            'description': '中等分辨率长时间序列'
-        },
-        {
-            'name': 'rb_data_Ra_1e+05_extra.h5',
-            'nx': 512,
-            'ny': 128,
-            'nt': 10000,  # 超长时间序列
-            'description': '标准分辨率超长时间序列'
+            'nt': 8000,  # 大量时间步产生更多clips
+            'description': '高质量大型数据集'
         }
     ]
 
