@@ -44,9 +44,8 @@ def generate_large_dataset():
         output_path = os.path.join(data_dir, dataset['name'])
 
         if os.path.exists(output_path):
-            print(f"✅ 已存在: {dataset['name']}")
-            generated_files.append(output_path)
-            continue
+            print(f"🔄 删除旧文件: {dataset['name']}")
+            os.remove(output_path)  # 强制重新生成
 
         print(f"🔄 生成数据集 {i+1}/{len(datasets)}: {dataset['description']}")
         print(f"   分辨率: {dataset['nx']}x{dataset['ny']}")
