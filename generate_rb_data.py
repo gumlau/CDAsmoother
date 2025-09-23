@@ -285,6 +285,110 @@ def create_consolidated_dataset_improved(save_path, Ra, all_data, nx, ny):
     return output_file
 
 
+def create_visualization(data_file, save_path):
+    """创建RB数据可视化"""
+    print(f"\n🎨 创建可视化: {data_file}")
+
+    import h5py
+    import matplotlib.pyplot as plt
+
+    with h5py.File(data_file, 'r') as f:
+        # 读取数据
+        p_data = f['p'][:]  # 压力
+        b_data = f['b'][:]  # 温度(浮力)
+        u_data = f['u'][:]  # X速度
+        w_data = f['w'][:]  # Y速度
+
+        n_runs, n_samples, ny, nx = p_data.shape
+        print(f"  数据形状: {n_runs} runs × {n_samples} samples × {ny}×{nx}")
+
+    # 选择第一个运行的几个时间步进行可视化
+    run_idx = 0
+    time_steps = [0, n_samples//4, n_samples//2, 3*n_samples//4, n_samples-1]
+
+    # 创建可视化
+    fig, axes = plt.subplots(4, len(time_steps), figsize=(15, 12))
+    fig.suptitle(f'Rayleigh-Benard Convection Visualization (Run {run_idx+1})', fontsize=16)
+
+    for i, t in enumerate(time_steps):
+        # 温度场
+        im1 = axes[0, i].imshow(b_data[run_idx, t], cmap='RdBu_r', aspect='equal')
+        axes[0, i].set_title(f'Temperature t={t}')
+        axes[0, i].set_xticks([])
+        axes[0, i].set_yticks([])
+
+        # 压力场
+        im2 = axes[1, i].imshow(p_data[run_idx, t], cmap='viridis', aspect='equal')
+        axes[1, i].set_title(f'Pressure t={t}')
+        axes[1, i].set_xticks([])
+        axes[1, i].set_yticks([])
+
+        # X速度场
+        im3 = axes[2, i].imshow(u_data[run_idx, t], cmap='RdBu', aspect='equal')
+        axes[2, i].set_title(f'U Velocity t={t}')
+        axes[2, i].set_xticks([])
+        axes[2, i].set_yticks([])
+
+        # Y速度场
+        im4 = axes[3, i].imshow(w_data[run_idx, t], cmap='RdBu', aspect='equal')
+        axes[3, i].set_title(f'W Velocity t={t}')
+        axes[3, i].set_xticks([])
+        axes[3, i].set_yticks([])
+
+    # 添加颜色条
+    plt.colorbar(im1, ax=axes[0, :], shrink=0.6, label='Temperature')
+    plt.colorbar(im2, ax=axes[1, :], shrink=0.6, label='Pressure')
+    plt.colorbar(im3, ax=axes[2, :], shrink=0.6, label='U Velocity')
+    plt.colorbar(im4, ax=axes[3, :], shrink=0.6, label='W Velocity')
+
+    plt.tight_layout()
+
+    # 保存图像
+    viz_file = f"{save_path}/rb_visualization.png"
+    plt.savefig(viz_file, dpi=150, bbox_inches='tight')
+    print(f"✅ 可视化保存: {viz_file}")
+
+    # 创建单个样本的流场可视化
+    fig2, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+
+    # 选择中间时间步
+    mid_t = n_samples // 2
+    T = b_data[run_idx, mid_t]
+    U = u_data[run_idx, mid_t]
+    W = w_data[run_idx, mid_t]
+
+    # 温度场作为背景
+    im = ax1.imshow(T, cmap='RdBu_r', aspect='equal', extent=[0, 3, 0, 1])
+    ax1.set_title('Temperature Field')
+    ax1.set_xlabel('x')
+    ax1.set_ylabel('y')
+    plt.colorbar(im, ax=ax1, label='Temperature')
+
+    # 流场矢量图
+    x = np.linspace(0, 3, nx)
+    y = np.linspace(0, 1, ny)
+    X, Y = np.meshgrid(x, y)
+
+    # 降采样以便清晰显示矢量
+    skip = 4
+    ax2.imshow(T, cmap='RdBu_r', aspect='equal', extent=[0, 3, 0, 1], alpha=0.7)
+    ax2.quiver(X[::skip, ::skip], Y[::skip, ::skip],
+               U[::skip, ::skip], W[::skip, ::skip],
+               scale=3, width=0.003, alpha=0.8)
+    ax2.set_title('Flow Field Vectors')
+    ax2.set_xlabel('x')
+    ax2.set_ylabel('y')
+
+    plt.tight_layout()
+
+    # 保存流场图
+    flow_file = f"{save_path}/rb_flow_field.png"
+    plt.savefig(flow_file, dpi=150, bbox_inches='tight')
+    print(f"✅ 流场图保存: {flow_file}")
+
+    plt.close('all')
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='基于原有代码的改进RB数据生成器')
     parser.add_argument('--Ra', type=float, default=1e5, help='瑞利数')
@@ -311,6 +415,12 @@ if __name__ == '__main__':
         ny=args.ny,
         save_path=args.save_path
     )
+
+    # 可视化
+    if args.visualize:
+        data_file = f"{args.save_path}/rb2d_ra{args.Ra:.0e}_consolidated.h5"
+        if os.path.exists(data_file):
+            create_visualization(data_file, args.save_path)
 
     print("\n✅ 改进数据生成完成！")
     print(f"📁 数据保存在: {args.save_path}/")

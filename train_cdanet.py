@@ -474,7 +474,7 @@ def parse_args():
     parser.add_argument('--unet_nf', type=int, default=32, help='U-Net base features')
     parser.add_argument('--unet_mf', type=int, default=256, help='U-Net max features')
     parser.add_argument('--imnet_nf', type=int, default=256, help='ImNet features')
-    parser.add_argument('--nonlin', type=str, default='sine', help='Nonlinearity')
+    parser.add_argument('--nonlin', type=str, default='tanh', help='Nonlinearity (tanh/relu/swish/etc)')
 
     # Physics parameters
     parser.add_argument('--rayleigh', type=float, default=1e5, help='Rayleigh number')
@@ -498,7 +498,8 @@ def parse_args():
     parser.add_argument('--output_folder', type=str, default='./outputs_fixed',
                        help='Output directory')
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
-    parser.add_argument('--device', type=str, default='cuda', help='Device')
+    parser.add_argument('--device', type=str, default='auto', choices=['auto', 'cuda', 'mps', 'cpu'],
+                       help='Device (auto=自动选择最佳设备)')
     parser.add_argument('--resume', type=str, help='Resume from checkpoint')
 
     return parser.parse_args()
@@ -512,9 +513,22 @@ def main():
     print("Fixed CDAnet Training (Reference Implementation)")
     print("=" * 60)
 
-    # Setup device
-    device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
-    print(f"Using device: {device}")
+    # Setup device - 兼容Mac和CUDA
+    if args.device == 'auto':
+        if torch.cuda.is_available():
+            device = torch.device('cuda')
+            print("🚀 Using CUDA GPU")
+        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            device = torch.device('mps')
+            print("🍎 Using Apple Silicon MPS")
+        else:
+            device = torch.device('cpu')
+            print("💻 Using CPU")
+    else:
+        device = torch.device(args.device)
+        print(f"Using specified device: {device}")
+
+    print(f"Device: {device}")
 
     # Create output directory
     os.makedirs(args.output_folder, exist_ok=True)
