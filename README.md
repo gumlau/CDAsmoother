@@ -152,16 +152,17 @@ python train_paper_config.py  # Ra=1e5 (default)
 
 ### Quick Data Generation (Recommended)
 ```bash
-# Generate improved RB simulation data with physics-based validation
+# Generate stable RB simulation data with physics-informed time evolution
 python generate_rb_data.py --Ra 1e5 --n_runs 5 --n_samples 50 --visualize
 ```
 
 **Features:**
-- ✅ **Numerically stable** Rayleigh-Bénard simulation
-- ✅ **Multi-scale convection** patterns (large/medium/small scale)
-- ✅ **Automatic consolidation** into CDAnet-compatible format
-- ✅ **Built-in visualization** for data validation
-- ✅ **Physics validation** with proper ranges and statistics
+- ✅ **Stable analytical patterns** with proper time evolution
+- ✅ **Multi-scale convection** structures (large/medium scale rolls)
+- ✅ **Physics-informed** velocity fields from stream functions
+- ✅ **Realistic ranges** and temporal evolution
+- ✅ **Fast generation** (seconds vs. hours) without numerical instabilities
+- ✅ **Training-compatible** format with proper attributes
 
 ### Advanced Data Generation
 ```bash
