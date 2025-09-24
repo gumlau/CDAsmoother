@@ -36,13 +36,13 @@ def parse_args():
                        help='Variable to visualize')
     parser.add_argument('--times', nargs='+', type=float, default=[15.0, 18.2, 21.5],
                        help='Time points to visualize')
-    parser.add_argument('--n_snapshots', type=int, default=8,
+    parser.add_argument('--n_snapshots', type=int, default=4,
                        help='Number of snapshots for temporal evolution')
     
     # Data options
-    parser.add_argument('--spatial_downsample', type=int, default=4,
+    parser.add_argument('--spatial_downsample', type=int, default=2,
                        help='Spatial downsampling factor')
-    parser.add_argument('--temporal_downsample', type=int, default=4,
+    parser.add_argument('--temporal_downsample', type=int, default=2,
                        help='Temporal downsampling factor')
     
     # Output options  
@@ -88,13 +88,24 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
 
     # Check if state dict loads correctly
     try:
-        model.load_state_dict(checkpoint['model_state_dict'])
-        print(f"✅ Model state dict loaded successfully")
+        if 'model_state_dict' in checkpoint:
+            model.load_state_dict(checkpoint['model_state_dict'])
+            print(f"✅ Model state dict loaded successfully")
+        elif 'unet_state_dict' in checkpoint and 'imnet_state_dict' in checkpoint:
+            # Handle separate UNet and IMNet state dicts from low-memory training
+            model.feature_extractor.load_state_dict(checkpoint['unet_state_dict'])
+            model.implicit_net.load_state_dict(checkpoint['imnet_state_dict'])
+            print(f"✅ UNet and IMNet state dicts loaded successfully")
+        else:
+            raise ValueError("No compatible state dict found in checkpoint")
     except Exception as e:
         print(f"❌ Error loading model state dict: {e}")
         print(f"Model state dict keys: {list(model.state_dict().keys())[:5]}...")
-        if 'model_state_dict' in checkpoint:
-            print(f"Checkpoint state dict keys: {list(checkpoint['model_state_dict'].keys())[:5]}...")
+        print(f"Checkpoint keys: {list(checkpoint.keys())}")
+        if 'unet_state_dict' in checkpoint:
+            print(f"UNet state dict keys: {list(checkpoint['unet_state_dict'].keys())[:5]}...")
+        if 'imnet_state_dict' in checkpoint:
+            print(f"IMNet state dict keys: {list(checkpoint['imnet_state_dict'].keys())[:5]}...")
 
     model.eval()
 
