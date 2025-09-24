@@ -20,6 +20,12 @@ from cdanet.models import CDAnet
 from cdanet.data import RBDataModule
 from cdanet.config import ExperimentConfig
 
+# Import original models from training script
+import sys
+sys.path.append('./sourcecodeCDAnet')
+from model.unet3d import UNet3d
+from model.imnet import ImNet
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Create CDAnet visualizations')
@@ -67,56 +73,54 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
     checkpoint = torch.load(checkpoint_path, map_location='cpu')
     print(f"🔍 Checkpoint keys: {list(checkpoint.keys())}")
 
-    # Create model
-    if 'config' in checkpoint:
-        config_dict = checkpoint['config']
-        model_config = config_dict['model']
-        print(f"🔍 Using config from checkpoint: {model_config}")
-    else:
-        # Default config matching working_example_checkpoint.pth
-        model_config = {
-            'in_channels': 4,
-            'feature_channels': 128,  # Matches working example
-            'mlp_hidden_dims': [256, 256],  # Matches working example
-            'activation': 'softplus',
-            'coord_dim': 3,
-            'output_dim': 4
-        }
-        print(f"🔍 Using default config: {model_config}")
+    # Create models using original architecture from training script
+    print("🔧 Creating models using original UNet3d + ImNet architecture...")
 
-    model = CDAnet(**model_config)
+    # Model parameters (matching train_cdanet.py defaults)
+    in_features = 4  # T, p, u, v
+    lat_dims = 128   # latent dimensions
+    unet_nf = 16     # UNet number of features
+    unet_mf = 4      # UNet multiplier factor
+    imnet_nf = 256   # ImNet number of features
 
-    # Check if state dict loads correctly
+    # Create UNet3d and ImNet models
+    unet = UNet3d(in_features=in_features, out_features=lat_dims,
+                  igres=(32, 64), nf=unet_nf, mf=unet_mf)  # Adjusted for your data resolution
+    imnet = ImNet(dim=3, in_features=lat_dims, out_features=4,
+                  nf=imnet_nf, activation='softplus')
+
+    # Load state dicts
     try:
-        if 'model_state_dict' in checkpoint:
-            model.load_state_dict(checkpoint['model_state_dict'])
-            print(f"✅ Model state dict loaded successfully")
-        elif 'unet_state_dict' in checkpoint and 'imnet_state_dict' in checkpoint:
-            # Handle separate UNet and IMNet state dicts from low-memory training
-            model.feature_extractor.load_state_dict(checkpoint['unet_state_dict'])
-            model.implicit_net.load_state_dict(checkpoint['imnet_state_dict'])
+        if 'unet_state_dict' in checkpoint and 'imnet_state_dict' in checkpoint:
+            unet.load_state_dict(checkpoint['unet_state_dict'])
+            imnet.load_state_dict(checkpoint['imnet_state_dict'])
             print(f"✅ UNet and IMNet state dicts loaded successfully")
         else:
-            raise ValueError("No compatible state dict found in checkpoint")
+            raise ValueError("UNet and IMNet state dicts not found in checkpoint")
     except Exception as e:
         print(f"❌ Error loading model state dict: {e}")
-        print(f"Model state dict keys: {list(model.state_dict().keys())[:5]}...")
         print(f"Checkpoint keys: {list(checkpoint.keys())}")
         if 'unet_state_dict' in checkpoint:
             print(f"UNet state dict keys: {list(checkpoint['unet_state_dict'].keys())[:5]}...")
         if 'imnet_state_dict' in checkpoint:
             print(f"IMNet state dict keys: {list(checkpoint['imnet_state_dict'].keys())[:5]}...")
+        raise
 
-    model.eval()
+    unet.eval()
+    imnet.eval()
 
     # Check if model parameters look reasonable
-    total_params = sum(p.numel() for p in model.parameters())
-    print(f"🔍 Total model parameters: {total_params:,}")
+    unet_params = sum(p.numel() for p in unet.parameters())
+    imnet_params = sum(p.numel() for p in imnet.parameters())
+    total_params = unet_params + imnet_params
+    print(f"🔍 Total model parameters: {unet_params:,} (UNet) + {imnet_params:,} (ImNet) = {total_params:,} total")
 
-    # Check a few parameter values
-    for name, param in model.named_parameters():
-        print(f"🔍 {name}: shape {param.shape}, mean {param.mean().item():.6f}, std {param.std().item():.6f}")
-        if len(list(model.named_parameters())) > 5:  # Only show first few
+    # Check a few parameter values from UNet
+    param_count = 0
+    for name, param in unet.named_parameters():
+        print(f"🔍 unet.{name}: shape {param.shape}, mean {param.mean().item():.6f}, std {param.std().item():.6f}")
+        param_count += 1
+        if param_count >= 3:  # Only show first few
             break
     
     # Setup data with normalization (as per paper and training)
@@ -170,8 +174,24 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
             print(f"  Input T: [{low_res[0,0].min():.3f}, {low_res[0,0].max():.3f}]")
             print(f"  Target T: [{targets[0,:,0].min():.3f}, {targets[0,:,0].max():.3f}]")
 
-            # Get predictions
-            predictions = model(low_res, coords)
+            # Get predictions using the original UNet + ImNet pipeline
+            # Step 1: UNet processes low-res input to get latent grid
+            latent_grid = unet(low_res)  # [batch, lat_dims, T, H, W]
+
+            # Step 2: Permute for implicit grid query
+            latent_grid = latent_grid.permute(0, 2, 3, 4, 1)  # [batch, T, H, W, lat_dims]
+
+            # Step 3: Use ImNet to query at coordinate points
+            # Import the query function
+            sys.path.append('./sourcecodeCDAnet')
+            from local_implicit_grid import query_local_implicit_grid
+
+            # Define domain bounds (normalized coordinates -1 to 1)
+            xmin = torch.tensor([-1.0, -1.0, -1.0], device=coords.device)
+            xmax = torch.tensor([1.0, 1.0, 1.0], device=coords.device)
+
+            # Query the implicit grid
+            predictions = query_local_implicit_grid(imnet, latent_grid, coords, xmin, xmax)
             print(f"  Prediction T: [{predictions[0,:,0].min():.3f}, {predictions[0,:,0].max():.3f}]")
 
             # CRITICAL: Handle denormalization carefully
