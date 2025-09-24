@@ -22,9 +22,24 @@ from cdanet.config import ExperimentConfig
 
 # Import original models from training script
 import sys
-sys.path.append('./sourcecodeCDAnet')
-from model.unet3d import UNet3d
-from model.imnet import ImNet
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), 'sourcecodeCDAnet'))
+
+# Try multiple import paths
+try:
+    from model.unet3d import UNet3d
+    from model.implicit_net import ImNet
+except ImportError:
+    try:
+        sys.path.append('./sourcecodeCDAnet')
+        from model.unet3d import UNet3d
+        from model.implicit_net import ImNet
+    except ImportError:
+        # Last resort - check current directory structure
+        print("Available directories:", [d for d in os.listdir('.') if os.path.isdir(d)])
+        if os.path.exists('./sourcecodeCDAnet/model'):
+            print("Contents of sourcecodeCDAnet/model:", os.listdir('./sourcecodeCDAnet/model'))
+        raise ImportError("Could not import UNet3d and ImNet models")
 
 
 def parse_args():
@@ -183,8 +198,11 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
 
             # Step 3: Use ImNet to query at coordinate points
             # Import the query function
-            sys.path.append('./sourcecodeCDAnet')
-            from local_implicit_grid import query_local_implicit_grid
+            try:
+                from local_implicit_grid import query_local_implicit_grid
+            except ImportError:
+                sys.path.append('./sourcecodeCDAnet')
+                from local_implicit_grid import query_local_implicit_grid
 
             # Define domain bounds (normalized coordinates -1 to 1)
             xmin = torch.tensor([-1.0, -1.0, -1.0], device=coords.device)
