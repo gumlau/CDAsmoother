@@ -216,17 +216,19 @@ def main():
                     continue
 
                 optimizer.step()
-                train_loss += total_loss.item()
+
+                # Log progress before cleanup
+                current_loss = total_loss.item()
+                train_loss += current_loss
                 valid_batches += 1
+
+                if batch_idx % 10 == 0:
+                    print(f"  Batch {batch_idx}/{len(train_loader)}, Loss: {current_loss:.2e}, Grad Norm: {grad_norm:.2e}")
 
                 # Clear intermediate variables
                 del pred_value, total_loss
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
-
-                if batch_idx % 10 == 0:
-                    current_loss = total_reg_loss.item() + args.alpha_pde * total_pde_loss.item() if total_pde_loss > 0 else total_reg_loss.item()
-                    print(f"  Batch {batch_idx}/{len(train_loader)}, Loss: {current_loss:.2e}, Grad Norm: {grad_norm:.2e}")
 
             except RuntimeError as e:
                 if "out of memory" in str(e).lower():
