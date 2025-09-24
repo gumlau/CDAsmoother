@@ -199,7 +199,16 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
 
             # Get predictions using CDAnet with memory-efficient chunking
             batch_size, num_coords, coord_dim = coords.shape
-            chunk_size = 2048  # Reduced chunk size for better memory management (was 4096)
+
+            # Adaptive chunk size based on available GPU memory
+            if torch.cuda.is_available():
+                gpu_memory_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
+                if gpu_memory_gb > 10:  # RTX 3080 Ti has 12GB
+                    chunk_size = 8192  # Larger chunks for more VRAM
+                else:
+                    chunk_size = 4096  # Conservative for smaller VRAM
+            else:
+                chunk_size = 2048  # CPU fallback
             predictions_list = []
 
             print(f"  Processing {num_coords} coordinates in chunks of {chunk_size}")

@@ -48,10 +48,10 @@ def main():
     """Memory-optimized main function"""
     args = parse_args()
 
-    # Enhanced parameters for better GPU utilization and data augmentation
-    print("🔧 Applying enhanced settings for better GPU utilization and training diversity...")
-    args.batch_size = 2           # Increased from 1 for better GPU utilization
-    args.n_samp_pts_per_crop = 2048  # Significantly increased to utilize GPU better (was 128)
+    # 为CUDA GPU优化参数，解决水平条纹问题
+    print("🔧 CUDA优化设置...")
+    args.batch_size = 4           # CUDA GPU批次
+    args.n_samp_pts_per_crop = 4096  # GPU内存充分利用
     args.nx = 128                 # Keep as power of 2 for U-Net compatibility
     args.nz = 64                  # Keep as power of 2 for U-Net compatibility
     args.nt = 16                  # Keep as power of 2 for U-Net compatibility
@@ -65,9 +65,8 @@ def main():
     args.spatial_flip_prob = 0.5       # Probability of spatial flipping
     args.noise_level = 0.02           # Gaussian noise level for robustness
 
-    print(f"Enhanced settings:")
-    print(f"  Batch size: {args.batch_size} (increased for GPU utilization)")
-    print(f"  Sample points per crop: {args.n_samp_pts_per_crop} (16x increase for GPU)")
+    print(f"CUDA设置:")
+    print(f"  批次: {args.batch_size}, 采样点: {args.n_samp_pts_per_crop}")
     print(f"  Spatial resolution: {args.nx} x {args.nz}")
     print(f"  Temporal resolution: {args.nt}")
     print(f"  Learning rate: {args.lr}")
@@ -79,22 +78,18 @@ def main():
     print(f"    - Noise level: {args.noise_level}")
     print()
 
-    # Setup device with memory management
+    # Setup CUDA device with optimization
     if args.device == 'auto':
         if torch.cuda.is_available():
             device = torch.device('cuda')
-            print("🚀 Using CUDA GPU with optimization")
-            # Clear CUDA cache
+            print("🚀 使用CUDA GPU")
             torch.cuda.empty_cache()
-            # Print GPU info
+            torch.backends.cudnn.benchmark = True
             print(f"GPU: {torch.cuda.get_device_name(0)}")
-            print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
-        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-            device = torch.device('mps')
-            print("🍎 Using Apple Silicon MPS with memory optimization")
+            print(f"显存: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
         else:
             device = torch.device('cpu')
-            print("💻 Using CPU")
+            print("💻 Using CPU (CUDA not available)")
     else:
         device = torch.device(args.device)
 
@@ -176,23 +171,25 @@ def main():
         velOnly=args.velocityOnly
     )
 
-    # Create data loaders optimized for GPU utilization with larger batches
+    # Create data loaders optimized for CUDA GPU
     train_loader = DataLoader(
         train_dataset,
         batch_size=args.batch_size,
         shuffle=True,
-        num_workers=4,  # Increased workers for better GPU utilization
-        pin_memory=True,  # Enable for faster GPU transfer
-        drop_last=True   # Drop incomplete batches for consistent training
+        num_workers=8,  # More workers for CUDA GPU
+        pin_memory=True,  # Essential for CUDA performance
+        drop_last=True,  # Consistent batch sizes for CUDNN optimization
+        persistent_workers=True  # Keep workers alive for efficiency
     )
 
     eval_loader = DataLoader(
         eval_dataset,
         batch_size=args.batch_size,
         shuffle=False,
-        num_workers=4,
+        num_workers=8,
         pin_memory=True,
-        drop_last=False
+        drop_last=False,
+        persistent_workers=True
     )
 
     print("Creating CDAnet model with reference architecture...")

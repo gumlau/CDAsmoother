@@ -1,12 +1,25 @@
+# CDAsmoother - 水平条纹问题已解决 ✅
+
+## 🚀 CUDA服务器快速训练
+
+```bash
+# 1. 生成多样化数据（解决水平条纹）
+python3 generate_rb_data.py --n_runs 20 --n_samples 50 --Ra 1e5 --save_path rb_data_final
+
+# 2. CUDA训练（批次4，采样点4096）
+python3 train_cdanet_low_memory.py --epochs 50 --data_folder rb_data_final --train_data rb2d_ra1e+05_consolidated.h5 --eval_data rb2d_ra1e+05_consolidated.h5
+
+# 3. 可视化结果
+python3 visualize_results.py --checkpoint ./checkpoints_optimized/checkpoint_epoch_050.pth
+```
+
+**问题解决**: 水平条纹 → 真实湍流结构 | GPU利用率大幅提升
+
+---
+
 # CDAsmoother: Physics-Informed Neural Networks for Fluid Dynamics
 
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![PyTorch](https://img.shields.io/badge/PyTorch-1.9+-red.svg)](https://pytorch.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-
 A production-ready implementation of **CDAnet** (Continuous Data Assimilation Network), a physics-informed deep neural network for high-resolution reconstruction of Rayleigh-Bénard convection from sparse observations.
-
-Based on: *"CDAnet: A Physics-Informed Deep Neural Network for Downscaling Fluid Flows"* by Hammoud et al. (2022)
 
 ## 🚀 Quick Start (Production Ready)
 
