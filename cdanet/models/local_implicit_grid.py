@@ -118,7 +118,13 @@ def query_local_implicit_grid(model, latent_grid, query_pts, xmin, xmax):
 
     corner_values, weights, x_relative = regular_nd_grid_interpolation_coefficients(
         latent_grid, query_pts, xmin, xmax)
-    concat_features = torch.cat([x_relative, corner_values], dim=-1)  # [b, num_points, 2**d,  d+c]
+
+    # Expand x_relative to match corner_values dimensions
+    # x_relative: [batch, num_points, spatial_dim] -> [batch, num_points, num_corners, spatial_dim]
+    num_corners = corner_values.shape[2]
+    x_relative_expanded = x_relative.unsqueeze(2).expand(-1, -1, num_corners, -1)
+
+    concat_features = torch.cat([x_relative_expanded, corner_values], dim=-1)  # [b, num_points, 2**d,  d+c]
     input_shape = concat_features.shape
 
     # flatten and feed through model
