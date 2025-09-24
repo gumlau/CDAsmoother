@@ -220,7 +220,7 @@ def main():
                 valid_batches += 1
 
                 # Clear intermediate variables
-                del latent_grid, pred_value, total_loss
+                del pred_value, total_loss
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
 
