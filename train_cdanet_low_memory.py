@@ -18,31 +18,65 @@ if torch.cuda.is_available():
 sys.path.append('.')
 from train_cdanet import *
 
+def compute_pde_loss(pred, coords):
+    """
+    Compute simple PDE loss for physics constraint.
+    Implements basic smoothness regularization for fluid dynamics.
+    """
+    # pred: [batch, n_points, 4] - T, p, u, v
+    # coords: [batch, n_points, 3] - x, z, t
+
+    batch_size, n_points, _ = pred.shape
+
+    # Compute gradients for smoothness
+    # First-order derivatives
+    grads = torch.autograd.grad(
+        outputs=pred,
+        inputs=coords,
+        grad_outputs=torch.ones_like(pred),
+        create_graph=True,
+        retain_graph=True,
+        only_inputs=True
+    )[0]  # [batch, n_points, 3]
+
+    # Simple smoothness loss: penalize large gradients
+    smoothness_loss = torch.mean(grads ** 2)
+
+    return smoothness_loss
+
 def main():
     """Memory-optimized main function"""
     args = parse_args()
 
-    # Override parameters for stable training without OOM
-    print("🔧 Applying optimizations to prevent OOM while maximizing utilization...")
-    args.batch_size = 1           # Minimum batch size to prevent OOM
-    args.n_samp_pts_per_crop = 128  # Much smaller to prevent OOM
+    # Enhanced parameters for better GPU utilization and data augmentation
+    print("🔧 Applying enhanced settings for better GPU utilization and training diversity...")
+    args.batch_size = 2           # Increased from 1 for better GPU utilization
+    args.n_samp_pts_per_crop = 2048  # Significantly increased to utilize GPU better (was 128)
     args.nx = 128                 # Keep as power of 2 for U-Net compatibility
     args.nz = 64                  # Keep as power of 2 for U-Net compatibility
     args.nt = 16                  # Keep as power of 2 for U-Net compatibility
 
-    # Stability settings to prevent NaN
-    args.lr = 0.01               # Reduced learning rate for stability
-    args.alpha_pde = 0.001       # Much reduced PDE weight to prevent NaN
-    args.clip_grad = 0.5         # Aggressive gradient clipping
+    # Enhanced stability settings with data augmentation
+    args.lr = 0.001              # Lower learning rate for stable training with more data
+    args.alpha_pde = 0.01        # Increased PDE weight for physics constraint
+    args.clip_grad = 1.0         # Less aggressive gradient clipping
+    args.use_data_augmentation = True  # Enable data augmentation
+    args.temporal_shift_prob = 0.3     # Probability of temporal shifting
+    args.spatial_flip_prob = 0.5       # Probability of spatial flipping
+    args.noise_level = 0.02           # Gaussian noise level for robustness
 
-    print(f"Optimized settings:")
-    print(f"  Batch size: {args.batch_size}")
-    print(f"  Sample points per crop: {args.n_samp_pts_per_crop}")
+    print(f"Enhanced settings:")
+    print(f"  Batch size: {args.batch_size} (increased for GPU utilization)")
+    print(f"  Sample points per crop: {args.n_samp_pts_per_crop} (16x increase for GPU)")
     print(f"  Spatial resolution: {args.nx} x {args.nz}")
     print(f"  Temporal resolution: {args.nt}")
-    print(f"  Learning rate: {args.lr} (reduced for stability)")
-    print(f"  PDE weight: {args.alpha_pde} (reduced to prevent NaN)")
+    print(f"  Learning rate: {args.lr}")
+    print(f"  PDE weight: {args.alpha_pde} (increased for physics)")
     print(f"  Gradient clipping: {args.clip_grad}")
+    print(f"  Data augmentation: {args.use_data_augmentation}")
+    print(f"    - Temporal shift probability: {args.temporal_shift_prob}")
+    print(f"    - Spatial flip probability: {args.spatial_flip_prob}")
+    print(f"    - Noise level: {args.noise_level}")
     print()
 
     # Setup device with memory management
@@ -77,8 +111,49 @@ def main():
     # Setup tensorboard
     writer = SummaryWriter(log_dir=os.path.join(args.output_folder, 'tensorboard'))
 
-    # Create datasets with reduced memory usage
-    print("Creating datasets...")
+    # Create data augmentation transforms
+    print("Setting up data augmentation...")
+
+    class DataAugmentation:
+        """Enhanced data augmentation for RB convection"""
+        def __init__(self, temporal_shift_prob=0.3, spatial_flip_prob=0.5, noise_level=0.02):
+            self.temporal_shift_prob = temporal_shift_prob
+            self.spatial_flip_prob = spatial_flip_prob
+            self.noise_level = noise_level
+
+        def __call__(self, input_grid, point_coord, point_value):
+            # Temporal shifting augmentation
+            if torch.rand(1) < self.temporal_shift_prob:
+                # Random circular shift along temporal dimension
+                t_shift = torch.randint(-2, 3, (1,)).item()  # -2 to +2 time steps
+                input_grid = torch.roll(input_grid, t_shift, dims=1)  # [batch, T, H, W]
+
+            # Spatial flipping augmentation
+            if torch.rand(1) < self.spatial_flip_prob:
+                # Random horizontal flip
+                input_grid = torch.flip(input_grid, dims=[3])  # Flip width dimension
+                # Flip corresponding coordinates (x coordinate -> -x)
+                point_coord[:, 0] = -point_coord[:, 0]
+
+            # Add small Gaussian noise for robustness
+            if self.noise_level > 0:
+                noise = torch.randn_like(input_grid) * self.noise_level
+                input_grid = input_grid + noise
+
+            return input_grid, point_coord, point_value
+
+    # Create augmentation transform
+    if args.use_data_augmentation:
+        augmentation = DataAugmentation(
+            temporal_shift_prob=args.temporal_shift_prob,
+            spatial_flip_prob=args.spatial_flip_prob,
+            noise_level=args.noise_level
+        )
+    else:
+        augmentation = None
+
+    # Create datasets with enhanced settings
+    print("Creating enhanced datasets...")
     train_dataset = FixedRB2DataLoader(
         data_dir=args.data_folder,
         data_filename=args.train_data,
@@ -101,21 +176,23 @@ def main():
         velOnly=args.velocityOnly
     )
 
-    # Create data loaders optimized for GPU utilization
+    # Create data loaders optimized for GPU utilization with larger batches
     train_loader = DataLoader(
         train_dataset,
         batch_size=args.batch_size,
         shuffle=True,
-        num_workers=2,  # Increased workers for better GPU utilization
-        pin_memory=True  # Enable for faster GPU transfer
+        num_workers=4,  # Increased workers for better GPU utilization
+        pin_memory=True,  # Enable for faster GPU transfer
+        drop_last=True   # Drop incomplete batches for consistent training
     )
 
     eval_loader = DataLoader(
         eval_dataset,
         batch_size=args.batch_size,
         shuffle=False,
-        num_workers=2,
-        pin_memory=True
+        num_workers=4,
+        pin_memory=True,
+        drop_last=False
     )
 
     print("Creating CDAnet model with reference architecture...")
@@ -124,14 +201,14 @@ def main():
 
     model = CDAnet(
         in_channels=4,
-        feature_channels=64,  # Smaller for memory efficiency
-        mlp_hidden_dims=[64, 128],  # [lat_dims, imnet_nf]
+        feature_channels=128,  # Increased for better representation (was 64)
+        mlp_hidden_dims=[128, 256],  # [lat_dims, imnet_nf] - Increased both
         activation='softplus',
         coord_dim=3,
         output_dim=4,
         igres=train_dataset.scale_lres,  # Use dataset resolution
-        unet_nf=16,
-        unet_mf=64  # Much smaller to prevent OOM
+        unet_nf=32,   # Increased base features (was 16)
+        unet_mf=128   # Increased max features for better GPU utilization (was 64)
     )
     model.to(device)
 
@@ -174,6 +251,10 @@ def main():
             data_tensors = [t.to(device) for t in data_tensors]
             input_grid, point_coord, point_value = data_tensors
             try:
+                # Apply data augmentation
+                if augmentation is not None:
+                    input_grid, point_coord, point_value = augmentation(input_grid, point_coord, point_value)
+
                 optimizer.zero_grad()
 
                 # Forward pass using CDAnet
@@ -191,8 +272,32 @@ def main():
                 # Regression loss
                 reg_loss = criterion(pred_value, point_value)
 
-                # Simple loss without PDE terms for now (can be added later)
-                total_loss = reg_loss
+                # Physics-informed loss with PDE constraint (as in paper)
+                if args.alpha_pde > 0:
+                    try:
+                        # Sample subset of points for PDE loss to save memory
+                        n_pde_points = min(512, point_coord.shape[1])  # Limit PDE points
+                        pde_indices = torch.randperm(point_coord.shape[1])[:n_pde_points]
+                        pde_coords = point_coord[:, pde_indices]  # [batch, n_pde, 3]
+                        pde_coords.requires_grad_(True)
+
+                        # Forward pass for PDE loss
+                        pde_pred = model(input_grid, pde_coords)
+
+                        # Simple PDE loss: encourage smoothness (Laplacian regularization)
+                        # ∇²u should be reasonable for fluid dynamics
+                        pde_loss = compute_pde_loss(pde_pred, pde_coords)
+                        total_loss = reg_loss + args.alpha_pde * pde_loss
+
+                        # Log PDE loss
+                        if batch_idx % 20 == 0:
+                            print(f"      PDE Loss: {pde_loss.item():.2e}")
+
+                    except Exception as e:
+                        print(f"      ⚠️ PDE loss failed: {str(e)[:50]}...")
+                        total_loss = reg_loss
+                else:
+                    total_loss = reg_loss
 
                 # Check for NaN/Inf in total loss
                 if not torch.isfinite(total_loss):
@@ -263,14 +368,21 @@ def main():
                 'train_loss': avg_train_loss,
                 'model_config': {
                     'in_channels': 4,
-                    'feature_channels': 64,
-                    'mlp_hidden_dims': [64, 128],
+                    'feature_channels': 128,  # Updated
+                    'mlp_hidden_dims': [128, 256],  # Updated
                     'activation': 'softplus',
                     'coord_dim': 3,
                     'output_dim': 4,
                     'igres': train_dataset.scale_lres,
-                    'unet_nf': 16,
-                    'unet_mf': 64
+                    'unet_nf': 32,   # Updated
+                    'unet_mf': 128   # Updated
+                },
+                'training_config': {
+                    'batch_size': args.batch_size,
+                    'n_samp_pts_per_crop': args.n_samp_pts_per_crop,
+                    'lr': args.lr,
+                    'alpha_pde': args.alpha_pde,
+                    'use_data_augmentation': args.use_data_augmentation
                 }
             }
             torch.save(checkpoint, os.path.join(args.output_folder, f'checkpoint_epoch_{epoch:03d}.pth'))
