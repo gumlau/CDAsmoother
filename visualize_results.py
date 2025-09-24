@@ -153,6 +153,11 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
     print(f"🔍 Debug Info:")
     print(f"  Test loader batches: {len(test_loader)}")
 
+    # Clear GPU memory before starting
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        print(f"  GPU Memory before: {torch.cuda.memory_allocated()/1024**3:.2f} GB allocated")
+
     results = {
         'input_fields': [],
         'truth_fields': [],
@@ -161,6 +166,10 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model.to(device)
+    model.eval()
+
+    if torch.cuda.is_available():
+        print(f"  GPU Memory after model load: {torch.cuda.memory_allocated()/1024**3:.2f} GB allocated")
     
     with torch.no_grad():
         for i, batch in enumerate(test_loader):
@@ -169,10 +178,14 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
             if i >= 10:  # Limit to first 10 batches for visualization
                 break
 
-            # Move to device
-            low_res = batch['low_res'].to(device)
-            coords = batch['coords'].to(device)
-            targets = batch['targets'].to(device)
+            # Move to device with memory optimization
+            low_res = batch['low_res'].to(device, non_blocking=True)
+            coords = batch['coords'].to(device, non_blocking=True)
+            targets = batch['targets'].to(device, non_blocking=True)
+
+            # Log memory usage for the problematic batch
+            if torch.cuda.is_available():
+                print(f"    GPU Memory after data load: {torch.cuda.memory_allocated()/1024**3:.2f} GB")
 
             # Debug data shapes and ranges
             print(f"  📊 Data shapes:")
@@ -184,8 +197,29 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
             print(f"  Input T: [{low_res[0,0].min():.3f}, {low_res[0,0].max():.3f}]")
             print(f"  Target T: [{targets[0,:,0].min():.3f}, {targets[0,:,0].max():.3f}]")
 
-            # Get predictions using CDAnet
-            predictions = model(low_res, coords)
+            # Get predictions using CDAnet with memory-efficient chunking
+            batch_size, num_coords, coord_dim = coords.shape
+            chunk_size = 2048  # Reduced chunk size for better memory management (was 4096)
+            predictions_list = []
+
+            print(f"  Processing {num_coords} coordinates in chunks of {chunk_size}")
+
+            for i in range(0, num_coords, chunk_size):
+                end_idx = min(i + chunk_size, num_coords)
+                coord_chunk = coords[:, i:end_idx, :]  # [1, chunk_size, 3]
+
+                with torch.no_grad():  # Save memory during inference
+                    pred_chunk = model(low_res, coord_chunk)
+                    predictions_list.append(pred_chunk.cpu())  # Move to CPU immediately
+
+                # Clear GPU cache
+                torch.cuda.empty_cache()
+
+                if (i // chunk_size + 1) % 5 == 0:
+                    print(f"    Processed {end_idx}/{num_coords} coordinates")
+
+            # Concatenate all predictions
+            predictions = torch.cat(predictions_list, dim=1).to(coords.device)
             print(f"  Prediction T: [{predictions[0,:,0].min():.3f}, {predictions[0,:,0].max():.3f}]")
 
             # CRITICAL: Handle denormalization carefully
