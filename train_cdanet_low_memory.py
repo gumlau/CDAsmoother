@@ -24,11 +24,11 @@ def main():
 
     # Override parameters for stable training without OOM
     print("🔧 Applying optimizations to prevent OOM while maximizing utilization...")
-    args.batch_size = 2           # Reduced to prevent OOM
-    args.n_samp_pts_per_crop = 256  # Reduced to prevent OOM
-    args.nx = 96                  # Reduced spatial resolution
-    args.nz = 48                  # Reduced spatial resolution
-    args.nt = 12                  # Reduced temporal resolution
+    args.batch_size = 1           # Minimum batch size to prevent OOM
+    args.n_samp_pts_per_crop = 128  # Much smaller to prevent OOM
+    args.nx = 128                 # Keep as power of 2 for U-Net compatibility
+    args.nz = 64                  # Keep as power of 2 for U-Net compatibility
+    args.nt = 16                  # Keep as power of 2 for U-Net compatibility
 
     # Stability settings to prevent NaN
     args.lr = 0.01               # Reduced learning rate for stability
@@ -122,11 +122,11 @@ def main():
     # Create smaller models
     in_features = 2 if args.velocityOnly else 4
 
-    unet = UNet3d(in_features=in_features, out_features=128,  # Reduced to prevent OOM
-                  igres=train_dataset.scale_lres, nf=24, mf=128)  # Reduced features
+    unet = UNet3d(in_features=in_features, out_features=64,   # Much smaller to prevent OOM
+                  igres=train_dataset.scale_lres, nf=16, mf=64)   # Minimal features
 
-    imnet = ImNet(dim=3, in_features=128,  # Reduced to prevent OOM
-                  out_features=4, nf=128,  # Reduced features
+    imnet = ImNet(dim=3, in_features=64,   # Much smaller to prevent OOM
+                  out_features=4, nf=64,   # Minimal features
                   activation=NONLINEARITIES[args.nonlin])
 
     unet.to(device)
@@ -203,7 +203,7 @@ def main():
                 pde_layer.update_forward_method(pde_fwd_fn)
 
                 # Process points in smaller chunks to avoid memory issues
-                chunk_size = 32  # Much smaller chunks to prevent OOM
+                chunk_size = 16  # Minimal chunks to prevent OOM
                 total_reg_loss = 0.0
                 total_pde_loss = 0.0
 
