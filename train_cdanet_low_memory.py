@@ -22,28 +22,39 @@ def main():
     """Memory-optimized main function"""
     args = parse_args()
 
-    # Override memory-heavy parameters
-    print("🔧 Applying memory optimizations...")
-    args.batch_size = 1           # Much smaller batch size
-    args.n_samp_pts_per_crop = 256  # Reduce from 1024 to 256
-    args.nx = 64                  # Smaller spatial resolution
-    args.nz = 32                  # Smaller spatial resolution
-    args.nt = 8                   # Smaller temporal resolution
+    # Override parameters for GPU utilization and stability
+    print("🔧 Applying optimizations for full GPU utilization...")
+    args.batch_size = 6           # Increased for better GPU usage
+    args.n_samp_pts_per_crop = 512  # Balanced: not too low, not too high
+    args.nx = 128                 # Keep original spatial resolution
+    args.nz = 64                  # Keep original spatial resolution
+    args.nt = 16                  # Keep original temporal resolution
 
-    print(f"Memory optimized settings:")
+    # Stability settings to prevent NaN
+    args.lr = 0.01               # Reduced learning rate for stability
+    args.alpha_pde = 0.001       # Much reduced PDE weight to prevent NaN
+    args.clip_grad = 0.5         # Aggressive gradient clipping
+
+    print(f"Optimized settings:")
     print(f"  Batch size: {args.batch_size}")
     print(f"  Sample points per crop: {args.n_samp_pts_per_crop}")
     print(f"  Spatial resolution: {args.nx} x {args.nz}")
     print(f"  Temporal resolution: {args.nt}")
+    print(f"  Learning rate: {args.lr} (reduced for stability)")
+    print(f"  PDE weight: {args.alpha_pde} (reduced to prevent NaN)")
+    print(f"  Gradient clipping: {args.clip_grad}")
     print()
 
     # Setup device with memory management
     if args.device == 'auto':
         if torch.cuda.is_available():
             device = torch.device('cuda')
-            print("🚀 Using CUDA GPU with memory optimization")
+            print("🚀 Using CUDA GPU with optimization")
             # Clear CUDA cache
             torch.cuda.empty_cache()
+            # Print GPU info
+            print(f"GPU: {torch.cuda.get_device_name(0)}")
+            print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
         elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
             device = torch.device('mps')
             print("🍎 Using Apple Silicon MPS with memory optimization")
@@ -56,7 +67,7 @@ def main():
     print(f"Device: {device}")
 
     # Create output directory
-    args.output_folder = './checkpoints_low_memory'
+    args.output_folder = './checkpoints_optimized'
     os.makedirs(args.output_folder, exist_ok=True)
 
     # Set random seeds
@@ -90,32 +101,32 @@ def main():
         velOnly=args.velocityOnly
     )
 
-    # Create data loaders with smaller batches
+    # Create data loaders optimized for GPU utilization
     train_loader = DataLoader(
         train_dataset,
         batch_size=args.batch_size,
         shuffle=True,
-        num_workers=0,  # Reduce CPU memory usage
-        pin_memory=False  # Reduce GPU memory usage
+        num_workers=2,  # Increased workers for better GPU utilization
+        pin_memory=True  # Enable for faster GPU transfer
     )
 
     eval_loader = DataLoader(
         eval_dataset,
         batch_size=args.batch_size,
         shuffle=False,
-        num_workers=0,
-        pin_memory=False
+        num_workers=2,
+        pin_memory=True
     )
 
     print("Creating models...")
     # Create smaller models
     in_features = 2 if args.velocityOnly else 4
 
-    unet = UNet3d(in_features=in_features, out_features=128,  # Reduced from 256
-                  igres=train_dataset.scale_lres, nf=32, mf=128)  # Reduced max features
+    unet = UNet3d(in_features=in_features, out_features=256,  # Restored full capacity
+                  igres=train_dataset.scale_lres, nf=args.unet_nf, mf=args.unet_mf)
 
-    imnet = ImNet(dim=3, in_features=128,  # Reduced from 256
-                  out_features=4, nf=128,  # Reduced from 256
+    imnet = ImNet(dim=3, in_features=256,  # Restored full capacity
+                  out_features=4, nf=args.imnet_nf,
                   activation=NONLINEARITIES[args.nonlin])
 
     unet.to(device)
@@ -127,18 +138,26 @@ def main():
     total_params = unet_params + imnet_params
     print(f"Model parameters: {unet_params:,} (U-Net) + {imnet_params:,} (ImNet) = {total_params:,} total")
 
-    # Create optimizer with gradient clipping
+    # Create optimizer with stability settings
     params = list(unet.parameters()) + list(imnet.parameters())
-    optimizer = torch.optim.Adam(params, lr=args.lr, weight_decay=args.weight_decay)
+    optimizer = torch.optim.Adam(params, lr=args.lr, weight_decay=args.weight_decay, eps=1e-8)
+
+    # Learning rate scheduler for stability
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', factor=0.5, patience=10, verbose=True
+    )
 
     # Create loss function and PDE layer
     criterion = torch.nn.MSELoss()
     pde_layer = get_rb2_pde_layer()
 
-    # Training loop with memory management
-    print("Starting memory-optimized training...\n")
+    # Training loop with stability enhancements
+    print("Starting optimized training with stability enhancements...\n")
 
     best_loss = float('inf')
+    nan_count = 0
+    max_nan_tolerance = 5  # Allow some NaN before stopping
+
     for epoch in range(1, args.epochs + 1):
         print(f"Epoch {epoch}/{args.epochs}")
 
@@ -150,6 +169,7 @@ def main():
         unet.train()
         imnet.train()
         train_loss = 0.0
+        valid_batches = 0
 
         for batch_idx, data_tensors in enumerate(train_loader):
             data_tensors = [t.to(device) for t in data_tensors]
@@ -200,32 +220,61 @@ def main():
                     # Compute predictions and residues for chunk
                     pred_value, residue_dict = pde_layer(chunk_coord, return_residue=True)
 
+                    # Check for NaN in predictions
+                    if torch.isnan(pred_value).any():
+                        print(f"⚠️  NaN detected in predictions at batch {batch_idx}, chunk {chunk_idx}")
+                        nan_count += 1
+                        break
+
                     # Regression loss
                     reg_loss = criterion(pred_value, chunk_value)
                     total_reg_loss += reg_loss
 
-                    # PDE loss (only compute every few chunks to save memory)
-                    if chunk_idx % 4 == 0:  # Reduce PDE computation frequency
-                        pde_tensors = torch.stack([d for d in residue_dict.values()], dim=0)
-                        pde_loss = criterion(pde_tensors, torch.zeros_like(pde_tensors))
-                        total_pde_loss += pde_loss
+                    # PDE loss with stability check (compute less frequently)
+                    if chunk_idx % 2 == 0:  # Every other chunk
+                        pde_tensors = []
+                        for residue_name, residue_val in residue_dict.items():
+                            if not torch.isnan(residue_val).any() and torch.isfinite(residue_val).all():
+                                pde_tensors.append(residue_val)
+
+                        if pde_tensors:
+                            pde_tensor = torch.stack(pde_tensors, dim=0)
+                            pde_loss = criterion(pde_tensor, torch.zeros_like(pde_tensor))
+                            if torch.isfinite(pde_loss):
+                                total_pde_loss += pde_loss
 
                 # Average losses
                 total_reg_loss = total_reg_loss / n_chunks
                 if total_pde_loss > 0:
-                    total_pde_loss = total_pde_loss / max(1, n_chunks // 4)
+                    total_pde_loss = total_pde_loss / max(1, n_chunks // 2)
 
-                # Total loss
+                # Total loss with stability check
                 total_loss = total_reg_loss + args.alpha_pde * total_pde_loss
 
-                # Backward pass
+                # Check for NaN/Inf in total loss
+                if not torch.isfinite(total_loss):
+                    print(f"⚠️  Non-finite loss at batch {batch_idx}: {total_loss.item()}")
+                    nan_count += 1
+                    if nan_count > max_nan_tolerance:
+                        print("❌ Too many NaN losses, stopping training")
+                        return
+                    continue
+
+                # Backward pass with gradient clipping
                 total_loss.backward()
 
-                # Gradient clipping
-                torch.nn.utils.clip_grad_norm_(params, max_norm=1.0)
+                # Aggressive gradient clipping
+                grad_norm = torch.nn.utils.clip_grad_norm_(params, max_norm=args.clip_grad)
+
+                # Check gradient norm
+                if not torch.isfinite(grad_norm):
+                    print(f"⚠️  Non-finite gradient norm at batch {batch_idx}")
+                    nan_count += 1
+                    continue
 
                 optimizer.step()
                 train_loss += total_loss.item()
+                valid_batches += 1
 
                 # Clear intermediate variables
                 del latent_grid, pred_value, total_loss
@@ -234,7 +283,7 @@ def main():
 
                 if batch_idx % 10 == 0:
                     current_loss = total_reg_loss.item() + args.alpha_pde * total_pde_loss.item() if total_pde_loss > 0 else total_reg_loss.item()
-                    print(f"  Batch {batch_idx}/{len(train_loader)}, Loss: {current_loss:.2e}")
+                    print(f"  Batch {batch_idx}/{len(train_loader)}, Loss: {current_loss:.2e}, Grad Norm: {grad_norm:.2e}")
 
             except RuntimeError as e:
                 if "out of memory" in str(e).lower():
@@ -245,8 +294,19 @@ def main():
                 else:
                     raise e
 
-        avg_train_loss = train_loss / len(train_loader)
-        print(f"  Average train loss: {avg_train_loss:.2e}")
+        if valid_batches > 0:
+            avg_train_loss = train_loss / valid_batches
+            print(f"  Average train loss: {avg_train_loss:.2e} (valid batches: {valid_batches}/{len(train_loader)})")
+
+            # Learning rate scheduling
+            scheduler.step(avg_train_loss)
+
+            # Reset NaN count on successful epoch
+            if avg_train_loss < float('inf'):
+                nan_count = 0
+        else:
+            avg_train_loss = float('inf')
+            print(f"  No valid batches completed")
 
         # Save checkpoint every 5 epochs
         if epoch % 5 == 0:
@@ -255,13 +315,14 @@ def main():
                 'unet_state_dict': unet.state_dict(),
                 'imnet_state_dict': imnet.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict(),
                 'train_loss': avg_train_loss,
             }
             torch.save(checkpoint, os.path.join(args.output_folder, f'checkpoint_epoch_{epoch:03d}.pth'))
             print(f"  Checkpoint saved at epoch {epoch}")
 
     print("\n" + "=" * 60)
-    print("Memory-optimized training completed!")
+    print("Optimized training completed!")
     print(f"Checkpoints saved to: {args.output_folder}")
     print("=" * 60)
 
