@@ -1,149 +1,118 @@
 """
 CDAnet: Complete Physics-Informed Deep Neural Network for fluid dynamics.
-Combines 3D U-Net feature extractor with physics-informed MLP.
+Combines 3D U-Net feature extractor with implicit neural network.
+Based on the reference sourcecodeCDAnet architecture.
 """
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from .unet3d import UNet3D
-from .mlp import PhysicsInformedMLP
+from .unet3d_reference import UNet3d
+from .implicit_net import ImNet, get_activation
+from .local_implicit_grid import query_local_implicit_grid
 
 
 class CDAnet(nn.Module):
     """
-    Complete CDAnet architecture combining feature extraction and physics-informed prediction.
-    
+    Complete CDAnet architecture combining UNet3D feature extraction and ImNet prediction.
+    Based on the reference sourcecodeCDAnet implementation.
+
     Args:
         in_channels: Number of input channels (4 for T, p, u, v)
-        feature_channels: Number of feature channels from U-Net
-        mlp_hidden_dims: List of hidden dimensions for MLP
-        activation: Activation function for MLP
+        feature_channels: Number of latent feature channels from U-Net
+        mlp_hidden_dims: List with 2 elements [latent_dims, imnet_nf] for backward compatibility
+        activation: Activation function for ImNet
         coord_dim: Dimension of coordinates (3 for x, y, t)
         output_dim: Number of output variables (4 for T, p, u, v)
-        base_channels: Base number of channels for UNet3D first layer
+        igres: Input grid resolution (will be determined from data)
+        unet_nf: Base number of features for UNet
+        unet_mf: Max number of features for UNet
     """
-    
-    def __init__(self, in_channels=4, feature_channels=256, mlp_hidden_dims=[512, 512, 512, 512],
-                 activation='softplus', coord_dim=3, output_dim=4, base_channels=32, **kwargs):
+
+    def __init__(self, in_channels=4, feature_channels=128, mlp_hidden_dims=[128, 256],
+                 activation='softplus', coord_dim=3, output_dim=4,
+                 igres=(8, 32, 64), unet_nf=16, unet_mf=512, **kwargs):
         super(CDAnet, self).__init__()
-        
-        # Feature extractor (3D U-Net)
-        self.feature_extractor = UNet3D(
-            in_channels=in_channels,
-            feature_channels=feature_channels,
-            base_channels=base_channels
+
+        # Parse parameters for backward compatibility
+        if len(mlp_hidden_dims) >= 2:
+            lat_dims = mlp_hidden_dims[0]  # latent dimensions
+            imnet_nf = mlp_hidden_dims[1]  # ImNet width
+        else:
+            lat_dims = feature_channels
+            imnet_nf = 256
+
+        # Feature extractor (3D U-Net) - matches reference architecture
+        self.feature_extractor = UNet3d(
+            in_features=in_channels,
+            out_features=lat_dims,
+            igres=igres,
+            nf=unet_nf,
+            mf=unet_mf
         )
-        
-        # Physics-informed MLP
-        self.mlp = PhysicsInformedMLP(
-            feature_dim=feature_channels,
-            coord_dim=coord_dim,
-            hidden_dims=mlp_hidden_dims,
-            output_dim=output_dim,
-            activation=activation
+
+        # Implicit neural network - matches reference architecture
+        activation_fn = get_activation(activation)
+        self.implicit_net = ImNet(
+            dim=coord_dim,
+            in_features=lat_dims,
+            out_features=output_dim,
+            nf=imnet_nf,
+            activation=activation_fn
         )
-        
+
         self.coord_dim = coord_dim
         self.output_dim = output_dim
+        self.lat_dims = lat_dims
         
     def forward(self, low_res_input, coords):
         """
-        Forward pass through CDAnet.
-        
+        Forward pass through CDAnet following reference architecture.
+
         Args:
-            low_res_input: Low-resolution spatio-temporal clips [B, C, T, H, W]
-            coords: Spatio-temporal coordinates for high-res prediction [B, N, 3]
-            
+            low_res_input: Low-resolution input tensor [batch, channels, T, H, W]
+            coords: Query coordinates [batch, num_points, coord_dim]
+
         Returns:
-            outputs: High-resolution predictions [B, N, 4] (T, p, u, v)
+            predictions: Predicted values at query coordinates [batch, num_points, output_dim]
         """
-        # Extract features using 3D U-Net
-        features_3d = self.feature_extractor(low_res_input)  # [B, feature_channels, T, H, W]
-        
-        # Interpolate features to coordinate locations
-        features = self._interpolate_features(features_3d, coords)  # [B, N, feature_channels]
-        
-        # Predict high-resolution fields using MLP
-        outputs = self.mlp(features, coords)
-        
-        return outputs
-    
-    def forward_with_derivatives(self, low_res_input, coords):
-        """
-        Forward pass with derivative computation for PDE loss.
-        
-        Args:
-            low_res_input: Low-resolution input clips [B, C, T, H, W]
-            coords: Coordinates for derivative computation [B, N, 3]
-            
-        Returns:
-            outputs: Predicted fields [B, N, 4]
-            derivatives: Dictionary of partial derivatives
-        """
-        # Extract features
-        features_3d = self.feature_extractor(low_res_input)
-        features = self._interpolate_features(features_3d, coords)
-        
-        # Compute predictions and derivatives
-        outputs, derivatives = self.mlp.compute_derivatives(features, coords)
-        
-        return outputs, derivatives
-    
-    def _interpolate_features(self, features_3d, coords):
-        """
-        Interpolate 3D features to specific coordinate locations.
-        
-        Args:
-            features_3d: Feature tensor [B, C, T, H, W]
-            coords: Target coordinates [B, N, 3] (normalized to [-1, 1])
-            
-        Returns:
-            interpolated_features: Features at target coordinates [B, N, C]
-        """
-        B, C, T, H, W = features_3d.shape
-        B_coords, N, _ = coords.shape
-        
-        # Ensure batch sizes match
-        assert B == B_coords, f"Batch size mismatch: features {B}, coords {B_coords}"
-        
-        # Reshape coordinates for grid_sample: [B, 1, 1, N, 3]
-        coords_reshaped = coords.unsqueeze(1).unsqueeze(1)  # [B, 1, 1, N, 3]
-        
-        # Transpose features for grid_sample: [B, C, T, H, W] -> [B, C, W, H, T]
-        features_transposed = features_3d.permute(0, 1, 4, 3, 2)
-        
-        # Use grid_sample for 3D interpolation
-        # coords should be in order (x, y, t) corresponding to (W, H, T)
-        interpolated = F.grid_sample(
-            features_transposed, 
-            coords_reshaped, 
-            mode='bilinear', 
-            padding_mode='border', 
-            align_corners=False
-        )  # [B, C, 1, 1, N]
-        
-        # Reshape to [B, N, C]
-        interpolated_features = interpolated.squeeze(2).squeeze(2).transpose(1, 2)
-        
-        return interpolated_features
-    
+        # Step 1: Extract latent features using UNet3d
+        latent_grid = self.feature_extractor(low_res_input)  # [batch, lat_dims, T, H, W]
+
+        # Step 2: Permute for implicit grid query - reference format
+        latent_grid = latent_grid.permute(0, 2, 3, 4, 1)  # [batch, T, H, W, lat_dims]
+
+        # Step 3: Query the implicit grid using reference method
+        # Define domain bounds (normalized coordinates -1 to 1)
+        xmin = torch.tensor([-1.0, -1.0, -1.0], device=coords.device)
+        xmax = torch.tensor([1.0, 1.0, 1.0], device=coords.device)
+
+        # Use the reference query method
+        predictions = query_local_implicit_grid(self.implicit_net, latent_grid, coords, xmin, xmax)
+
+        return predictions
+
+    def get_latent_grid(self, low_res_input):
+        """Get latent grid representation (useful for visualization/debugging)."""
+        latent_grid = self.feature_extractor(low_res_input)
+        return latent_grid.permute(0, 2, 3, 4, 1)  # [batch, T, H, W, lat_dims]
+
     def get_num_parameters(self):
         """Get total number of trainable parameters."""
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
-    
+
     def print_model_info(self):
         """Print model architecture information."""
         print("=" * 50)
-        print("CDAnet Model Architecture")
+        print("CDAnet Model Architecture (Reference-based)")
         print("=" * 50)
         print(f"Total parameters: {self.get_num_parameters():,}")
         print()
-        print("Feature Extractor (3D U-Net):")
+        print("Feature Extractor (UNet3d):")
         unet_params = sum(p.numel() for p in self.feature_extractor.parameters() if p.requires_grad)
         print(f"  Parameters: {unet_params:,}")
         print()
-        print("Physics-Informed MLP:")
-        mlp_params = sum(p.numel() for p in self.mlp.parameters() if p.requires_grad)
-        print(f"  Parameters: {mlp_params:,}")
+        print("Implicit Network (ImNet):")
+        imnet_params = sum(p.numel() for p in self.implicit_net.parameters() if p.requires_grad)
+        print(f"  Parameters: {imnet_params:,}")
         print("=" * 50)

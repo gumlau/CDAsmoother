@@ -20,8 +20,7 @@ from cdanet.models import CDAnet
 from cdanet.data import RBDataModule
 from cdanet.config import ExperimentConfig
 
-# Import models from cdanet package (used in training)
-from cdanet.models.mlp import PhysicsInformedMLP
+# Use CDAnet models (correct implementation)
 
 
 def parse_args():
@@ -70,43 +69,38 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
     checkpoint = torch.load(checkpoint_path, map_location='cpu')
     print(f"🔍 Checkpoint keys: {list(checkpoint.keys())}")
 
-    # Create CDAnet model (used in training)
-    print("🔧 Creating CDAnet model...")
+    # Create CDAnet model with reference architecture
+    print("🔧 Creating CDAnet model with reference architecture...")
 
-    # Model parameters matching your training
+    # Model parameters matching the reference training (adjusted for your data)
     model_config = {
         'in_channels': 4,
-        'feature_channels': 128,
-        'mlp_hidden_dims': [256, 256],
+        'feature_channels': 128,  # This becomes lat_dims
+        'mlp_hidden_dims': [128, 256],  # [lat_dims, imnet_nf] for backward compatibility
         'activation': 'softplus',
         'coord_dim': 3,
-        'output_dim': 4
+        'output_dim': 4,
+        'igres': (8, 32, 64),  # Adjusted for your data resolution
+        'unet_nf': 16,
+        'unet_mf': 512
     }
     print(f"🔍 Using model config: {model_config}")
 
     model = CDAnet(**model_config)
 
-    # Load state dicts - handle the case where you have separate unet/imnet checkpoints
+    # Load state dicts using the correct reference architecture
     try:
-        if 'unet_state_dict' in checkpoint and 'imnet_state_dict' in checkpoint:
-            # Load UNet part
-            unet_dict = checkpoint['unet_state_dict']
-            feature_extractor_dict = {}
-            for key, value in unet_dict.items():
-                feature_extractor_dict[key] = value
-            model.feature_extractor.load_state_dict(feature_extractor_dict, strict=False)
-
-            # Load ImNet/MLP part
-            imnet_dict = checkpoint['imnet_state_dict']
-            mlp_dict = {}
-            for key, value in imnet_dict.items():
-                # Map ImNet keys to MLP keys if needed
-                mlp_dict[key] = value
-            model.mlp.load_state_dict(mlp_dict, strict=False)
-
-            print(f"✅ Loaded UNet and ImNet state dicts into CDAnet model")
+        if 'model_state_dict' in checkpoint:
+            # Standard loading for proper CDAnet checkpoints
+            model.load_state_dict(checkpoint['model_state_dict'])
+            print(f"✅ Loaded complete model state dict successfully")
+        elif 'unet_state_dict' in checkpoint and 'imnet_state_dict' in checkpoint:
+            # Load separate UNet and ImNet state dicts (from old training)
+            model.feature_extractor.load_state_dict(checkpoint['unet_state_dict'])
+            model.implicit_net.load_state_dict(checkpoint['imnet_state_dict'])
+            print(f"✅ Loaded separate UNet and ImNet state dicts successfully")
         else:
-            raise ValueError("UNet and ImNet state dicts not found in checkpoint")
+            raise ValueError("No compatible state dict found in checkpoint")
     except Exception as e:
         print(f"❌ Error loading model state dict: {e}")
         print(f"Checkpoint keys: {list(checkpoint.keys())}")
@@ -115,9 +109,10 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
         if 'imnet_state_dict' in checkpoint:
             print(f"ImNet state dict keys: {list(checkpoint['imnet_state_dict'].keys())[:5]}...")
 
-        # Try loading with strict=False and see what happens
-        print("🔧 Attempting partial loading...")
-        model.load_state_dict(checkpoint.get('model_state_dict', {}), strict=False)
+        # The architecture mismatch is the issue - inform user
+        print("🔧 Architecture mismatch detected. This checkpoint was trained with the old architecture.")
+        print("   Please retrain using the updated CDAnet architecture for best results.")
+        return None
 
     model.eval()
 

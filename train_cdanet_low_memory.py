@@ -118,29 +118,29 @@ def main():
         pin_memory=True
     )
 
-    print("Creating models...")
-    # Create smaller models
-    in_features = 2 if args.velocityOnly else 4
+    print("Creating CDAnet model with reference architecture...")
+    # Create CDAnet model using our corrected implementation
+    from cdanet.models import CDAnet
 
-    unet = UNet3d(in_features=in_features, out_features=64,   # Much smaller to prevent OOM
-                  igres=train_dataset.scale_lres, nf=16, mf=64)   # Minimal features
-
-    imnet = ImNet(dim=3, in_features=64,   # Much smaller to prevent OOM
-                  out_features=4, nf=64,   # Minimal features
-                  activation=NONLINEARITIES[args.nonlin])
-
-    unet.to(device)
-    imnet.to(device)
+    model = CDAnet(
+        in_channels=4,
+        feature_channels=64,  # Smaller for memory efficiency
+        mlp_hidden_dims=[64, 128],  # [lat_dims, imnet_nf]
+        activation='softplus',
+        coord_dim=3,
+        output_dim=4,
+        igres=train_dataset.scale_lres,  # Use dataset resolution
+        unet_nf=16,
+        unet_mf=64  # Much smaller to prevent OOM
+    )
+    model.to(device)
 
     # Count parameters
-    unet_params = sum(p.numel() for p in unet.parameters())
-    imnet_params = sum(p.numel() for p in imnet.parameters())
-    total_params = unet_params + imnet_params
-    print(f"Model parameters: {unet_params:,} (U-Net) + {imnet_params:,} (ImNet) = {total_params:,} total")
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f"Total model parameters: {total_params:,}")
 
     # Create optimizer with stability settings
-    params = list(unet.parameters()) + list(imnet.parameters())
-    optimizer = torch.optim.Adam(params, lr=args.lr, weight_decay=args.weight_decay, eps=1e-8)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay, eps=1e-8)
 
     # Learning rate scheduler for stability
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -166,8 +166,7 @@ def main():
             torch.cuda.empty_cache()
 
         # Training
-        unet.train()
-        imnet.train()
+        model.train()
         train_loss = 0.0
         valid_batches = 0
 
@@ -177,79 +176,23 @@ def main():
             try:
                 optimizer.zero_grad()
 
-                # Forward pass with gradient checkpointing to save memory
-                with torch.cuda.amp.autocast() if torch.cuda.is_available() else torch.no_grad():
-                    # Reduce batch size further if needed
-                    if batch_idx == 0:
-                        try:
-                            latent_grid = unet(input_grid)
-                        except RuntimeError as e:
-                            if "out of memory" in str(e).lower():
-                                print("⚠️  Still out of memory. Try reducing batch size to 1 or using CPU.")
-                                return
-                            else:
-                                raise e
-                    else:
-                        latent_grid = unet(input_grid)
+                # Forward pass using CDAnet
+                pred_value = model(input_grid, point_coord)
 
-                latent_grid = latent_grid.permute(0, 2, 3, 4, 1)
+                # Check for NaN in predictions
+                if torch.isnan(pred_value).any():
+                    print(f"⚠️  NaN detected in predictions at batch {batch_idx}")
+                    nan_count += 1
+                    if nan_count > max_nan_tolerance:
+                        print("❌ Too many NaN losses, stopping training")
+                        return
+                    continue
 
-                # Define forward function
-                xmin = torch.zeros(3, dtype=torch.float32).to(device)
-                xmax = torch.ones(3, dtype=torch.float32).to(device)
-                pde_fwd_fn = lambda points: query_local_implicit_grid(imnet, latent_grid, points, xmin, xmax)
+                # Regression loss
+                reg_loss = criterion(pred_value, point_value)
 
-                # Update PDE layer and compute with reduced points
-                pde_layer.update_forward_method(pde_fwd_fn)
-
-                # Process points in smaller chunks to avoid memory issues
-                chunk_size = 16  # Minimal chunks to prevent OOM
-                total_reg_loss = 0.0
-                total_pde_loss = 0.0
-
-                n_points = point_coord.shape[1]
-                n_chunks = (n_points + chunk_size - 1) // chunk_size
-
-                for chunk_idx in range(n_chunks):
-                    start_idx = chunk_idx * chunk_size
-                    end_idx = min((chunk_idx + 1) * chunk_size, n_points)
-
-                    chunk_coord = point_coord[:, start_idx:end_idx]
-                    chunk_value = point_value[:, start_idx:end_idx]
-
-                    # Compute predictions and residues for chunk
-                    pred_value, residue_dict = pde_layer(chunk_coord, return_residue=True)
-
-                    # Check for NaN in predictions
-                    if torch.isnan(pred_value).any():
-                        print(f"⚠️  NaN detected in predictions at batch {batch_idx}, chunk {chunk_idx}")
-                        nan_count += 1
-                        break
-
-                    # Regression loss
-                    reg_loss = criterion(pred_value, chunk_value)
-                    total_reg_loss += reg_loss
-
-                    # PDE loss with stability check (compute less frequently)
-                    if chunk_idx % 2 == 0:  # Every other chunk
-                        pde_tensors = []
-                        for residue_name, residue_val in residue_dict.items():
-                            if not torch.isnan(residue_val).any() and torch.isfinite(residue_val).all():
-                                pde_tensors.append(residue_val)
-
-                        if pde_tensors:
-                            pde_tensor = torch.stack(pde_tensors, dim=0)
-                            pde_loss = criterion(pde_tensor, torch.zeros_like(pde_tensor))
-                            if torch.isfinite(pde_loss):
-                                total_pde_loss += pde_loss
-
-                # Average losses
-                total_reg_loss = total_reg_loss / n_chunks
-                if total_pde_loss > 0:
-                    total_pde_loss = total_pde_loss / max(1, n_chunks // 2)
-
-                # Total loss with stability check
-                total_loss = total_reg_loss + args.alpha_pde * total_pde_loss
+                # Simple loss without PDE terms for now (can be added later)
+                total_loss = reg_loss
 
                 # Check for NaN/Inf in total loss
                 if not torch.isfinite(total_loss):
@@ -264,7 +207,7 @@ def main():
                 total_loss.backward()
 
                 # Aggressive gradient clipping
-                grad_norm = torch.nn.utils.clip_grad_norm_(params, max_norm=args.clip_grad)
+                grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=args.clip_grad)
 
                 # Check gradient norm
                 if not torch.isfinite(grad_norm):
@@ -312,11 +255,21 @@ def main():
         if epoch % 5 == 0:
             checkpoint = {
                 'epoch': epoch,
-                'unet_state_dict': unet.state_dict(),
-                'imnet_state_dict': imnet.state_dict(),
+                'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'scheduler_state_dict': scheduler.state_dict(),
                 'train_loss': avg_train_loss,
+                'model_config': {
+                    'in_channels': 4,
+                    'feature_channels': 64,
+                    'mlp_hidden_dims': [64, 128],
+                    'activation': 'softplus',
+                    'coord_dim': 3,
+                    'output_dim': 4,
+                    'igres': train_dataset.scale_lres,
+                    'unet_nf': 16,
+                    'unet_mf': 64
+                }
             }
             torch.save(checkpoint, os.path.join(args.output_folder, f'checkpoint_epoch_{epoch:03d}.pth'))
             print(f"  Checkpoint saved at epoch {epoch}")
