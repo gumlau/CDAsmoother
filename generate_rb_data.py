@@ -12,38 +12,97 @@ import matplotlib.pyplot as plt
 import argparse
 
 
-def generate_stable_rb_data(Ra=1e5, nx=128, ny=64, t=0.0, dt=0.1):
+def generate_stable_rb_data(Ra=1e5, nx=128, ny=64, t=0.0, dt=0.1, run_id=0):
     """
-    Generate stable RB convection patterns using analytical expressions
-    Based on physical understanding but numerically stable
+    Generate realistic RB convection patterns with diverse turbulent structures
+    Based on physical understanding with reduced regularity
     """
     Lx, Ly = 3.0, 1.0
     x = np.linspace(0, Lx, nx)
     y = np.linspace(0, Ly, ny)
     X, Y = np.meshgrid(x, y)
 
+    # Add run-specific randomness to break periodicity
+    np.random.seed(int(run_id * 1000 + t * 100) % 2147483647)
+
     # Base temperature field (linear + perturbations)
     T = 1.0 - Y / Ly
 
-    # Time-evolving convection patterns
-    # Large-scale rolls
-    omega1 = 0.5  # Slow evolution
-    T += 0.05 * np.sin(2 * np.pi * X / Lx + omega1 * t) * np.sin(np.pi * Y / Ly)
-    T += 0.02 * np.sin(4 * np.pi * X / Lx - omega1 * t * 0.7) * np.sin(2 * np.pi * Y / Ly)
+    # Generate more realistic convection with multiple scales and randomness
+    # Large-scale convection cells (less regular)
+    n_large_cells = np.random.randint(2, 5)  # 2-4 large cells
+    for i in range(n_large_cells):
+        phase_x = np.random.uniform(0, 2*np.pi)
+        phase_y = np.random.uniform(0, np.pi)
+        freq_x = np.random.uniform(1.5, 3.5)  # Variable frequency
+        amp = np.random.uniform(0.03, 0.08)   # Variable amplitude
+        omega = np.random.uniform(0.3, 0.8)   # Variable time evolution
 
-    # Medium-scale structures
-    omega2 = 1.2
-    T += 0.03 * np.sin(6 * np.pi * X / Lx + omega2 * t) * np.sin(1.5 * np.pi * Y / Ly)
-    T += 0.015 * np.sin(8 * np.pi * X / Lx - omega2 * t * 0.8) * np.sin(2.5 * np.pi * Y / Ly)
+        T += amp * np.sin(freq_x * np.pi * X / Lx + phase_x + omega * t) * \
+             np.sin(np.pi * Y / Ly + phase_y)
+
+    # Medium-scale turbulent structures
+    n_medium_cells = np.random.randint(3, 7)  # 3-6 medium cells
+    for i in range(n_medium_cells):
+        phase_x = np.random.uniform(0, 2*np.pi)
+        phase_y = np.random.uniform(0, 2*np.pi)
+        freq_x = np.random.uniform(4, 8)      # Higher frequency
+        freq_y = np.random.uniform(1.5, 3)    # Variable y frequency
+        amp = np.random.uniform(0.015, 0.035) # Smaller amplitude
+        omega = np.random.uniform(0.8, 1.8)   # Faster evolution
+
+        T += amp * np.sin(freq_x * np.pi * X / Lx + phase_x + omega * t) * \
+             np.sin(freq_y * np.pi * Y / Ly + phase_y)
+
+    # Small-scale fluctuations (breaking up regular patterns)
+    n_small_cells = np.random.randint(5, 12)  # Many small fluctuations
+    for i in range(n_small_cells):
+        phase_x = np.random.uniform(0, 2*np.pi)
+        phase_y = np.random.uniform(0, 2*np.pi)
+        freq_x = np.random.uniform(8, 16)     # High frequency
+        freq_y = np.random.uniform(3, 6)      # Higher y frequency
+        amp = np.random.uniform(0.005, 0.02)  # Small amplitude
+        omega = np.random.uniform(1.5, 3.0)   # Fast evolution
+
+        T += amp * np.sin(freq_x * np.pi * X / Lx + phase_x + omega * t) * \
+             np.cos(freq_y * np.pi * Y / Ly + phase_y)  # Mix sin/cos
+
+    # Add localized temperature anomalies (realistic thermal plumes)
+    n_plumes = np.random.randint(2, 6)
+    for i in range(n_plumes):
+        # Random plume locations
+        x_center = np.random.uniform(0.2, 0.8) * Lx
+        y_center = np.random.uniform(0.2, 0.8) * Ly
+        width_x = np.random.uniform(0.3, 0.8)
+        width_y = np.random.uniform(0.15, 0.4)
+        amplitude = np.random.uniform(0.02, 0.06)
+
+        # Gaussian-like thermal plume
+        plume = amplitude * np.exp(-((X - x_center)**2 / width_x**2 +
+                                   (Y - y_center)**2 / width_y**2))
+        # Time modulation
+        time_mod = np.sin(np.random.uniform(0.5, 2.0) * t + np.random.uniform(0, 2*np.pi))
+        T += plume * time_mod
 
     # Apply boundary conditions
     T[0, :] = 1.0   # Hot bottom
     T[-1, :] = 0.0  # Cold top
 
-    # Generate velocity fields from stream function
-    # Large-scale circulation
-    psi = 0.3 * np.sin(2 * np.pi * X / Lx + omega1 * t) * np.sin(np.pi * Y / Ly)
-    psi += 0.15 * np.sin(4 * np.pi * X / Lx - omega1 * t * 0.7) * np.sin(2 * np.pi * Y / Ly)
+    # Generate diverse velocity fields from stream function
+    psi = np.zeros_like(X)
+
+    # Multiple circulation patterns with randomness
+    n_circulations = np.random.randint(2, 5)
+    for i in range(n_circulations):
+        phase_x = np.random.uniform(0, 2*np.pi)
+        phase_y = np.random.uniform(0, np.pi)
+        freq_x = np.random.uniform(1, 4)      # Variable circulation size
+        freq_y = np.random.uniform(0.5, 2)    # Variable vertical structure
+        amp = np.random.uniform(0.1, 0.4)     # Variable strength
+        omega = np.random.uniform(0.2, 1.0)   # Variable time evolution
+
+        psi += amp * np.sin(freq_x * np.pi * X / Lx + phase_x + omega * t) * \
+               np.sin(freq_y * np.pi * Y / Ly + phase_y)
 
     # u = -∂ψ/∂y, v = ∂ψ/∂x
     u = np.zeros_like(X)
@@ -81,7 +140,8 @@ def generate_stable_rb_data(Ra=1e5, nx=128, ny=64, t=0.0, dt=0.1):
     p += -0.2 * (dudx * dvdy - dudy * dvdx)
 
     # Add small time-dependent pressure fluctuations
-    p += 0.1 * np.sin(2 * np.pi * X / Lx + omega1 * t * 1.5) * np.cos(np.pi * Y / Ly)
+    omega_p = np.random.uniform(0.5, 1.5)  # Random pressure oscillation
+    p += 0.1 * np.sin(2 * np.pi * X / Lx + omega_p * t * 1.5) * np.cos(np.pi * Y / Ly)
 
     return T, u, v, p
 
@@ -109,8 +169,8 @@ def generate_training_dataset(Ra=1e5, n_runs=5, n_samples=50, nx=128, ny=64, sav
         for sample in range(n_samples):
             t = t_offset + sample * dt
 
-            # Generate snapshot
-            T, u, v, p = generate_stable_rb_data(Ra=Ra, nx=nx, ny=ny, t=t, dt=dt)
+            # Generate snapshot with run-specific diversity
+            T, u, v, p = generate_stable_rb_data(Ra=Ra, nx=nx, ny=ny, t=t, dt=dt, run_id=run)
 
             # Save data
             frame_data = {
