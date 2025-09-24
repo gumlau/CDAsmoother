@@ -72,19 +72,24 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
     # Create CDAnet model with reference architecture
     print("🔧 Creating CDAnet model with reference architecture...")
 
-    # Model parameters matching the reference training (adjusted for your data)
-    model_config = {
-        'in_channels': 4,
-        'feature_channels': 128,  # This becomes lat_dims
-        'mlp_hidden_dims': [128, 256],  # [lat_dims, imnet_nf] for backward compatibility
-        'activation': 'softplus',
-        'coord_dim': 3,
-        'output_dim': 4,
-        'igres': (8, 32, 64),  # Adjusted for your data resolution
-        'unet_nf': 16,
-        'unet_mf': 512
-    }
-    print(f"🔍 Using model config: {model_config}")
+    # Use model config from checkpoint if available
+    if 'model_config' in checkpoint:
+        model_config = checkpoint['model_config']
+        print(f"🔍 Using model config from checkpoint: {model_config}")
+    else:
+        # Fallback config
+        model_config = {
+            'in_channels': 4,
+            'feature_channels': 64,  # Match training script
+            'mlp_hidden_dims': [64, 128],  # Match training script
+            'activation': 'softplus',
+            'coord_dim': 3,
+            'output_dim': 4,
+            'igres': (16, 32, 64),  # Match training data
+            'unet_nf': 16,
+            'unet_mf': 64  # Match training script
+        }
+        print(f"🔍 Using fallback model config: {model_config}")
 
     model = CDAnet(**model_config)
 
