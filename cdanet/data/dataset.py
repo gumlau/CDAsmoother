@@ -45,23 +45,47 @@ class RBDataset(Dataset):
         """Load data from HDF5 files."""
         if not os.path.exists(self.data_path):
             raise FileNotFoundError(f"Data path not found: {self.data_path}")
-            
+
         # Load high-resolution data
         with h5py.File(self.data_path, 'r') as f:
-            # Assume data format: [T, H, W, 4] where 4 = [T, p, u, v]
-            self.high_res_data = torch.tensor(f['data'][:], dtype=torch.float32)
-            
+            # Get frame keys and sort them
+            frame_keys = [k for k in f.keys() if k.startswith('frame_')]
+            frame_keys.sort()
+
+            if not frame_keys:
+                raise ValueError(f"No frame data found in {self.data_path}")
+
+            # Load first frame to get dimensions
+            first_frame = f[frame_keys[0]]
+            field_keys = ['temperature', 'pressure', 'velocity_x', 'velocity_y']  # Order: [T, p, u, v]
+
+            # Get spatial dimensions
+            temp_data = first_frame['temperature']
+            H, W = temp_data.shape
+            T = len(frame_keys)
+
+            # Pre-allocate tensor: [T, H, W, 4]
+            self.high_res_data = torch.zeros((T, H, W, 4), dtype=torch.float32)
+
+            # Load all frames
+            for t_idx, frame_key in enumerate(frame_keys):
+                frame = f[frame_key]
+                for var_idx, field in enumerate(field_keys):
+                    self.high_res_data[t_idx, :, :, var_idx] = torch.tensor(
+                        frame[field][:], dtype=torch.float32
+                    )
+
             # Get metadata
             if 'Ra' in f.attrs:
                 self.Ra = f.attrs['Ra']
             else:
                 self.Ra = 1e5  # Default
-                
+
             if 'Pr' in f.attrs:
-                self.Pr = f.attrs['Pr'] 
+                self.Pr = f.attrs['Pr']
             else:
                 self.Pr = 0.7  # Default
-                
+
             if 'dt' in f.attrs:
                 self.dt = f.attrs['dt']
             else:
