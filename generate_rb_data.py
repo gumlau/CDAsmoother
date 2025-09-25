@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import argparse
 
 
-def generate_stable_rb_data(Ra=1e5, nx=128, ny=64, t=0.0, dt=0.1, run_id=0):
+def generate_stable_rb_data(Ra=1e5, nx=256, ny=256, t=0.0, dt=0.1, run_id=0):
     """
     Generate realistic RB convection patterns with diverse turbulent structures
     Based on physical understanding with reduced regularity
@@ -336,10 +336,10 @@ def visualize_data(output_file):
 def main():
     parser = argparse.ArgumentParser(description='Generate stable Rayleigh-Bénard data')
     parser.add_argument('--Ra', type=float, default=1e5, help='Rayleigh number')
-    parser.add_argument('--n_runs', type=int, default=5, help='Number of runs')
-    parser.add_argument('--n_samples', type=int, default=50, help='Samples per run')
-    parser.add_argument('--nx', type=int, default=128, help='Grid points in x')
-    parser.add_argument('--ny', type=int, default=64, help='Grid points in y')
+    parser.add_argument('--n_runs', type=int, default=10, help='Number of runs')
+    parser.add_argument('--n_samples', type=int, default=100, help='Samples per run')
+    parser.add_argument('--nx', type=int, default=256, help='Grid points in x')
+    parser.add_argument('--ny', type=int, default=256, help='Grid points in y')
     parser.add_argument('--save_path', type=str, default='rb_data_numerical', help='Save directory')
     parser.add_argument('--visualize', action='store_true', help='Create visualizations')
 

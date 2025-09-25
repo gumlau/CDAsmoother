@@ -52,8 +52,8 @@ def main():
     print("🔧 CUDA优化设置...")
     args.batch_size = 4           # CUDA GPU批次
     args.n_samp_pts_per_crop = 1024  # Reference paper sample points (was 4096)
-    args.nx = 128                 # Keep as power of 2 for U-Net compatibility
-    args.nz = 64                  # Keep as power of 2 for U-Net compatibility
+    args.nx = 256                 # Match reference resolution
+    args.nz = 256                 # Match reference resolution
     args.nt = 16                  # Keep as power of 2 for U-Net compatibility
 
     # Match reference implementation parameters
@@ -61,9 +61,9 @@ def main():
     args.alpha_pde = 1.0         # Reference PDE weight (much stronger physics!)
     args.clip_grad = 1.0         # Reference gradient clipping
     args.use_data_augmentation = True  # Enable data augmentation
-    args.temporal_shift_prob = 0.3     # Probability of temporal shifting
-    args.spatial_flip_prob = 0.5       # Probability of spatial flipping
-    args.noise_level = 0.02           # Gaussian noise level for robustness
+    args.temporal_shift_prob = 0.7     # Higher probability of temporal shifting
+    args.spatial_flip_prob = 0.8       # Higher probability of spatial flipping
+    args.noise_level = 0.01            # Lower noise for stability
 
     print(f"CUDA设置:")
     print(f"  批次: {args.batch_size}, 采样点: {args.n_samp_pts_per_crop}")
@@ -216,10 +216,16 @@ def main():
     # Create optimizer matching reference (SGD + momentum)
     optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=1e-4)
 
-    # Learning rate scheduler for stability
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.5, patience=10, verbose=True
+    # Multi-stage learning rate scheduler for better convergence
+    # Stage 1: ReduceLROnPlateau for adaptive reduction
+    plateau_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', factor=0.7, patience=3, verbose=True, min_lr=1e-5
     )
+    # Stage 2: Cosine annealing for final convergence
+    cosine_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=20, eta_min=1e-6
+    )
+    current_scheduler = plateau_scheduler  # Start with plateau
 
     # Create loss function and PDE layer (L1 as in reference)
     criterion = torch.nn.L1Loss()
@@ -231,6 +237,9 @@ def main():
     best_loss = float('inf')
     nan_count = 0
     max_nan_tolerance = 5  # Allow some NaN before stopping
+    patience_counter = 0
+    early_stop_patience = 15  # Stop if no improvement for 15 epochs
+    min_improvement = 1e-4   # Minimum improvement to reset patience
 
     for epoch in range(1, args.epochs + 1):
         print(f"Epoch {epoch}/{args.epochs}")
@@ -345,12 +354,60 @@ def main():
             avg_train_loss = train_loss / valid_batches
             print(f"  Average train loss: {avg_train_loss:.2e} (valid batches: {valid_batches}/{len(train_loader)})")
 
-            # Learning rate scheduling
-            scheduler.step(avg_train_loss)
+            # Dynamic learning rate scheduling
+            current_lr = optimizer.param_groups[0]['lr']
+
+            # Switch to cosine annealing if plateau scheduler reduces LR too much
+            if current_lr < 0.005 and current_scheduler == plateau_scheduler:
+                print(f"🔄 Switching to cosine annealing at epoch {epoch}")
+                current_scheduler = cosine_scheduler
+
+            # Apply appropriate scheduler
+            if current_scheduler == plateau_scheduler:
+                current_scheduler.step(avg_train_loss)
+            else:
+                current_scheduler.step()
+
+            # Print learning rate changes
+            new_lr = optimizer.param_groups[0]['lr']
+            if abs(new_lr - current_lr) > 1e-8:
+                print(f"  📉 Learning rate: {current_lr:.2e} → {new_lr:.2e}")
+
+            # Early stopping and best model tracking
+            if avg_train_loss < best_loss - min_improvement:
+                best_loss = avg_train_loss
+                patience_counter = 0
+                print(f"  ✅ New best loss: {best_loss:.6f}")
+                # Save best model
+                torch.save({
+                    'epoch': epoch,
+                    'model_state_dict': model.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'train_loss': avg_train_loss,
+                    'model_config': {
+                        'in_channels': 4,
+                        'feature_channels': 32,
+                        'mlp_hidden_dims': [32],
+                        'activation': 'softplus',
+                        'coord_dim': 3,
+                        'output_dim': 4,
+                        'igres': train_dataset.scale_lres,
+                        'unet_nf': 16,
+                        'unet_mf': 256
+                    }
+                }, os.path.join(args.output_folder, 'best_model.pth'))
+            else:
+                patience_counter += 1
 
             # Reset NaN count on successful epoch
             if avg_train_loss < float('inf'):
                 nan_count = 0
+
+            # Early stopping check
+            if patience_counter >= early_stop_patience:
+                print(f"\n🛑 Early stopping triggered after {patience_counter} epochs without improvement")
+                print(f"Best loss achieved: {best_loss:.6f}")
+                break
         else:
             avg_train_loss = float('inf')
             print(f"  No valid batches completed")
