@@ -18,7 +18,7 @@ sys.path.append('.')
 
 # 直接导入模型和数据加载功能
 from cdanet.models import CDAnet
-from cdanet.data import RB2DataModule
+from cdanet.data import RBDataModule
 
 def load_model_from_checkpoint(checkpoint_path, device='cuda'):
     """从检查点加载模型"""
@@ -51,13 +51,12 @@ def setup_simple_data_module(data_dir, Ra_numbers=[1e5]):
     """简化的数据模块设置"""
     print(f"设置数据模块: {data_dir}")
 
-    data_module = RB2DataModule(
+    data_module = RBDataModule(
         data_dir=data_dir,
-        Ra_numbers=Ra_numbers,
         batch_size=1,
         normalize=True
     )
-    data_module.setup()
+    data_module.setup(Ra_numbers=Ra_numbers)
 
     print(f"✅ 数据模块设置完成")
     return data_module
