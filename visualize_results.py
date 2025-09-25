@@ -4,7 +4,7 @@ Create publication-quality visualizations for CDAnet results.
 Generates the classic Rayleigh-Bénard convection comparison plots.
 
 Usage:
-    python visualize_results.py --checkpoint checkpoints/best_model.pth --data_dir ./rb_data_numerical
+    python visualize_results.py --checkpoint checkpoints/best_model.pth --data_dir ./rb_data_final
     python visualize_results.py --demo  # Create demo visualization
 """
 
@@ -27,7 +27,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Create CDAnet visualizations')
     
     parser.add_argument('--checkpoint', type=str, help='Path to trained model checkpoint')
-    parser.add_argument('--data_dir', type=str, default='./rb_data_numerical',
+    parser.add_argument('--data_dir', type=str, default='./rb_data_final',
                        help='Directory containing test data')
     parser.add_argument('--output_dir', type=str, default='./visualizations',
                        help='Output directory for visualizations')
@@ -230,6 +230,23 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
             # Concatenate all predictions
             predictions = torch.cat(predictions_list, dim=1).to(coords.device)
             print(f"  Prediction T: [{predictions[0,:,0].min():.3f}, {predictions[0,:,0].max():.3f}]")
+
+            # 🔍 详细诊断信息
+            print(f"  🔍 模型诊断:")
+            pred_std = predictions[0,:,0].std().item()
+            target_std = targets[0,:,0].std().item()
+            print(f"    预测标准差: {pred_std:.4f}, 真实标准差: {target_std:.4f}")
+            print(f"    变异性比率: {pred_std/target_std:.4f} (应该接近1.0)")
+
+            correlation = torch.corrcoef(torch.stack([
+                predictions[0,:,0].flatten(),
+                targets[0,:,0].flatten()
+            ]))[0,1].item()
+            print(f"    温度相关系数: {correlation:.4f} (越接近1.0越好)")
+
+            pred_range = (predictions[0,:,0].max() - predictions[0,:,0].min()).item()
+            target_range = (targets[0,:,0].max() - targets[0,:,0].min()).item()
+            print(f"    范围比率: {pred_range/target_range:.4f} (应该接近1.0)")
 
             # CRITICAL: Handle denormalization carefully
             predictions_cpu = predictions.cpu()

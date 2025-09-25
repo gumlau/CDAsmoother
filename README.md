@@ -11,6 +11,9 @@ python3 train_cdanet_low_memory.py --epochs 50 --data_folder rb_data_final --tra
 
 # 3. 可视化结果
 python3 visualize_results.py --checkpoint ./checkpoints_optimized/checkpoint_epoch_050.pth
+
+# 4. 详细量化评估
+python3 quantitative_evaluation.py --checkpoint ./checkpoints_optimized/checkpoint_epoch_050.pth
 ```
 
 **问题解决**: 水平条纹 → 真实湍流结构 | GPU利用率大幅提升
