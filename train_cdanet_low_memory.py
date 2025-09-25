@@ -51,15 +51,15 @@ def main():
     # 为CUDA GPU优化参数，解决水平条纹问题
     print("🔧 CUDA优化设置...")
     args.batch_size = 4           # CUDA GPU批次
-    args.n_samp_pts_per_crop = 4096  # GPU内存充分利用
+    args.n_samp_pts_per_crop = 1024  # Reference paper sample points (was 4096)
     args.nx = 128                 # Keep as power of 2 for U-Net compatibility
     args.nz = 64                  # Keep as power of 2 for U-Net compatibility
     args.nt = 16                  # Keep as power of 2 for U-Net compatibility
 
-    # Enhanced stability settings with data augmentation
-    args.lr = 0.001              # Lower learning rate for stable training with more data
-    args.alpha_pde = 0.01        # Increased PDE weight for physics constraint
-    args.clip_grad = 1.0         # Less aggressive gradient clipping
+    # Match reference implementation parameters
+    args.lr = 0.01               # Reference paper learning rate
+    args.alpha_pde = 1.0         # Reference PDE weight (much stronger physics!)
+    args.clip_grad = 1.0         # Reference gradient clipping
     args.use_data_augmentation = True  # Enable data augmentation
     args.temporal_shift_prob = 0.3     # Probability of temporal shifting
     args.spatial_flip_prob = 0.5       # Probability of spatial flipping
@@ -198,14 +198,14 @@ def main():
 
     model = CDAnet(
         in_channels=4,
-        feature_channels=128,  # Increased for better representation (was 64)
-        mlp_hidden_dims=[128, 256],  # [lat_dims, imnet_nf] - Increased both
+        feature_channels=32,  # Reference lat_dims=32
+        mlp_hidden_dims=[32],  # Reference imnet_nf=32 (single layer)
         activation='softplus',
         coord_dim=3,
         output_dim=4,
         igres=train_dataset.scale_lres,  # Use dataset resolution
-        unet_nf=32,   # Increased base features (was 16)
-        unet_mf=128   # Increased max features for better GPU utilization (was 64)
+        unet_nf=16,   # Reference unet_nf=16
+        unet_mf=256   # Reference unet_mf=256
     )
     model.to(device)
 
@@ -213,16 +213,16 @@ def main():
     total_params = sum(p.numel() for p in model.parameters())
     print(f"Total model parameters: {total_params:,}")
 
-    # Create optimizer with stability settings
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay, eps=1e-8)
+    # Create optimizer matching reference (SGD + momentum)
+    optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=1e-4)
 
     # Learning rate scheduler for stability
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode='min', factor=0.5, patience=10, verbose=True
     )
 
-    # Create loss function and PDE layer
-    criterion = torch.nn.MSELoss()
+    # Create loss function and PDE layer (L1 as in reference)
+    criterion = torch.nn.L1Loss()
     pde_layer = get_rb2_pde_layer()
 
     # Training loop with stability enhancements
@@ -273,7 +273,7 @@ def main():
                 if args.alpha_pde > 0:
                     try:
                         # Sample subset of points for PDE loss to save memory
-                        n_pde_points = min(512, point_coord.shape[1])  # Limit PDE points
+                        n_pde_points = min(1024, point_coord.shape[1])  # Use more PDE points like reference
                         pde_indices = torch.randperm(point_coord.shape[1])[:n_pde_points]
                         pde_coords = point_coord[:, pde_indices]  # [batch, n_pde, 3]
                         pde_coords.requires_grad_(True)
@@ -365,14 +365,14 @@ def main():
                 'train_loss': avg_train_loss,
                 'model_config': {
                     'in_channels': 4,
-                    'feature_channels': 128,  # Updated
-                    'mlp_hidden_dims': [128, 256],  # Updated
+                    'feature_channels': 32,  # Reference lat_dims
+                    'mlp_hidden_dims': [32],  # Reference imnet_nf
                     'activation': 'softplus',
                     'coord_dim': 3,
                     'output_dim': 4,
                     'igres': train_dataset.scale_lres,
-                    'unet_nf': 32,   # Updated
-                    'unet_mf': 128   # Updated
+                    'unet_nf': 16,   # Reference unet_nf
+                    'unet_mf': 256   # Reference unet_mf
                 },
                 'training_config': {
                     'batch_size': args.batch_size,
