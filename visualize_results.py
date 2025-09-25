@@ -72,10 +72,18 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
     # Create CDAnet model with reference architecture
     print("🔧 Creating CDAnet model with reference architecture...")
 
-    # Use model config from checkpoint if available
+    # Use model config from checkpoint if available, but fix igres for actual data
     if 'model_config' in checkpoint:
         model_config = checkpoint['model_config']
         print(f"🔍 Using model config from checkpoint: {model_config}")
+
+        # Fix igres to match actual data dimensions if needed
+        # The data shows temporal=8, spatial=32x64, so we need igres=[8, 32, 64]
+        if 'igres' in model_config:
+            original_igres = model_config['igres']
+            # Update to match actual data dimensions: temporal=8, spatial=32x64
+            model_config['igres'] = (8, 32, 64)
+            print(f"🔧 Updated igres from {original_igres} to {model_config['igres']} to match data dimensions")
     else:
         # Fallback config
         model_config = {
@@ -85,7 +93,7 @@ def load_model_and_predict(checkpoint_path: str, data_path: str, Ra: float,
             'activation': 'softplus',
             'coord_dim': 3,
             'output_dim': 4,
-            'igres': (16, 32, 64),  # Match training data
+            'igres': (8, 32, 64),  # Match actual data dimensions
             'unet_nf': 16,
             'unet_mf': 64  # Match training script
         }
