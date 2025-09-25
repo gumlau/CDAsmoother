@@ -50,7 +50,7 @@ def main():
 
     # 为CUDA GPU优化参数，解决水平条纹问题
     print("🔧 CUDA优化设置...")
-    args.batch_size = 4           # CUDA GPU批次
+    args.batch_size = 2           # Reduce batch size for 256x256 resolution
     args.n_samp_pts_per_crop = 1024  # Reference paper sample points (was 4096)
     args.nx = 256                 # Match reference resolution
     args.nz = 256                 # Match reference resolution
@@ -65,17 +65,18 @@ def main():
     args.spatial_flip_prob = 0.8       # Higher probability of spatial flipping
     args.noise_level = 0.01            # Lower noise for stability
 
-    print(f"CUDA设置:")
-    print(f"  批次: {args.batch_size}, 采样点: {args.n_samp_pts_per_crop}")
-    print(f"  Spatial resolution: {args.nx} x {args.nz}")
-    print(f"  Temporal resolution: {args.nt}")
-    print(f"  Learning rate: {args.lr}")
-    print(f"  PDE weight: {args.alpha_pde} (increased for physics)")
-    print(f"  Gradient clipping: {args.clip_grad}")
-    print(f"  Data augmentation: {args.use_data_augmentation}")
-    print(f"    - Temporal shift probability: {args.temporal_shift_prob}")
-    print(f"    - Spatial flip probability: {args.spatial_flip_prob}")
-    print(f"    - Noise level: {args.noise_level}")
+    print(f"🚀 高分辨率训练配置:")
+    print(f"  批次: {args.batch_size} (降低以适应256x256分辨率)")
+    print(f"  采样点: {args.n_samp_pts_per_crop}")
+    print(f"  空间分辨率: {args.nx} x {args.nz} (匹配reference)")
+    print(f"  时间分辨率: {args.nt}")
+    print(f"  学习率: {args.lr} (reference设置)")
+    print(f"  PDE权重: {args.alpha_pde} (强物理约束)")
+    print(f"  梯度裁剪: {args.clip_grad}")
+    print(f"  数据增强: {args.use_data_augmentation}")
+    print(f"    - 时间偏移概率: {args.temporal_shift_prob}")
+    print(f"    - 空间翻转概率: {args.spatial_flip_prob}")
+    print(f"    - 噪声水平: {args.noise_level}")
     print()
 
     # Setup CUDA device with optimization
