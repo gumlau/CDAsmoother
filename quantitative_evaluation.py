@@ -10,8 +10,57 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 import os
-from visualize_results import load_model_and_predict, setup_data_module
+import sys
 import argparse
+
+# 添加项目路径
+sys.path.append('.')
+
+# 直接导入模型和数据加载功能
+from cdanet.models import CDAnet
+from cdanet.data import RB2DataModule
+
+def load_model_from_checkpoint(checkpoint_path, device='cuda'):
+    """从检查点加载模型"""
+    print(f"从检查点加载模型: {checkpoint_path}")
+
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    model_config = checkpoint['model_config']
+
+    # 创建模型
+    model = CDAnet(
+        in_channels=model_config['in_channels'],
+        feature_channels=model_config['feature_channels'],
+        mlp_hidden_dims=model_config['mlp_hidden_dims'],
+        activation=model_config['activation'],
+        coord_dim=model_config['coord_dim'],
+        output_dim=model_config['output_dim'],
+        igres=model_config['igres'],
+        unet_nf=model_config['unet_nf'],
+        unet_mf=model_config['unet_mf']
+    )
+
+    model.load_state_dict(checkpoint['model_state_dict'])
+    model.to(device)
+    model.eval()
+
+    print(f"✅ 模型加载成功，参数: {sum(p.numel() for p in model.parameters()):,}")
+    return model
+
+def setup_simple_data_module(data_dir, Ra_numbers=[1e5]):
+    """简化的数据模块设置"""
+    print(f"设置数据模块: {data_dir}")
+
+    data_module = RB2DataModule(
+        data_dir=data_dir,
+        Ra_numbers=Ra_numbers,
+        batch_size=1,
+        normalize=True
+    )
+    data_module.setup()
+
+    print(f"✅ 数据模块设置完成")
+    return data_module
 
 def comprehensive_evaluation(model, data_module, device='cuda'):
     """全面的模型评估"""
@@ -306,9 +355,8 @@ def main():
 
     # 加载模型和数据
     try:
-        from visualize_results import load_and_create_model
-        model = load_and_create_model(args.checkpoint, device)
-        data_module = setup_data_module([1e5], args.data_dir, normalize=True)
+        model = load_model_from_checkpoint(args.checkpoint, device)
+        data_module = setup_simple_data_module(args.data_dir, [1e5])
 
         # 详细评估
         all_metrics, all_predictions, all_targets = comprehensive_evaluation(
